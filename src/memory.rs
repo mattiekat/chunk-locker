@@ -12,7 +12,7 @@ const BUFFER_COUNT: usize = 16;
 pub const BUFFER_SIZE: usize = 1024 * 1024 * 16;
 
 /// Stored statically since the application should only ever have one set of buffers.
-static BUFFERS: [[u8; BUFFER_SIZE]; BUFFER_COUNT] = [[0; BUFFER_SIZE]; BUFFER_COUNT];
+static mut BUFFERS: [[u8; BUFFER_SIZE]; BUFFER_COUNT] = [[0; BUFFER_SIZE]; BUFFER_COUNT];
 /// True means a buffer is in use, false means it is not.
 static ALLOCATIONS: Mutex<[bool; BUFFER_COUNT]> = Mutex::const_new([false; BUFFER_COUNT]);
 static NOTIFY: Notify = Notify::const_new();
@@ -36,7 +36,7 @@ impl MemoryManager {
                 break MemoryHandle {
                     len: 0,
                     allocation_idx: idx,
-                    mem: BUFFERS[idx].as_ptr() as *mut [u8; BUFFER_SIZE],
+                    mem: unsafe { BUFFERS[idx].as_mut_ptr() as *mut [u8; BUFFER_SIZE] },
                 };
             } else {
                 // no buffer was available, unlock and then wait until we get notified that one is
