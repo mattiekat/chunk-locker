@@ -1,2 +1,4 @@
 /target
 .fleet
+launch.json
+config.toml
