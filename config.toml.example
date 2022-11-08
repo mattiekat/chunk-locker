@@ -1,10 +1,12 @@
 
 [store]
-s3_download_url = ""
-s3_endpoint = ""
-s3_region = ""
-s3_bucket = ""
-s3_key_id = ""
-s3_application_key = ""
 fs_root_path = ""
-s3_upload_chunk_size = 5000000
+
+[store.s3]
+download_url = ""
+endpoint = ""
+region = ""
+bucket = ""
+key_id = ""
+application_key = ""
+upload_chunk_size = 5000000

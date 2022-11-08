@@ -4,20 +4,9 @@ use once_cell::sync::OnceCell;
 
 use serde::Deserialize;
 
-#[derive(Deserialize)]
-pub struct StoreConfig {
-    pub s3_download_url: String,
-    pub s3_endpoint: String,
-    pub s3_region: String,
-    pub s3_bucket: String,
-    pub s3_key_id: String,
-    pub s3_application_key: String,
-    pub s3_upload_chunk_size: usize,
+use crate::store::StoreConfig;
 
-    fs_root_path: String,
-}
-
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct Config {
     pub store: StoreConfig,
 }
