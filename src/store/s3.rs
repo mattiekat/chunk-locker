@@ -187,7 +187,7 @@ impl Store for S3Store {
     }
 }
 
-async fn example_s3store() {
+pub async fn example_s3store() {
     let store = S3Store::new().await;
 
     let manager = MemoryManager::new();

@@ -16,5 +16,5 @@ async fn main() {
     // TODO: TUI
     println!("Hello, world!");
 
-    // example_s3store()
+    // store::s3::example_s3store().await;
 }
