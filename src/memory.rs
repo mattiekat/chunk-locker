@@ -2,18 +2,17 @@
 //! Using this also prevents a bottleneck in the pipeline from leading to increasingly more memory
 //! allocations.
 
+use itertools::Itertools;
 use std::ops::{Deref, DerefMut};
 use tokio::sync::{Mutex, Notify};
-use itertools::Itertools;
-
 
 /// Number of buffers to allocate
 const BUFFER_COUNT: usize = 16;
 /// Size of the buffers to allocate
-const BUFFER_SIZE: usize = 1024 * 1024 * 16;
+pub const BUFFER_SIZE: usize = 1024 * 1024 * 16;
 
 /// Stored statically since the application should only ever have one set of buffers.
-static BUFFERS: [[u8; BUFFER_SIZE]; BUFFER_COUNT] = [[0; BUFFER_SIZE]; BUFFER_COUNT];
+static mut BUFFERS: [[u8; BUFFER_SIZE]; BUFFER_COUNT] = [[0; BUFFER_SIZE]; BUFFER_COUNT];
 /// True means a buffer is in use, false means it is not.
 static ALLOCATIONS: Mutex<[bool; BUFFER_COUNT]> = Mutex::const_new([false; BUFFER_COUNT]);
 static NOTIFY: Notify = Notify::const_new();
@@ -23,7 +22,9 @@ pub struct MemoryManager;
 
 impl MemoryManager {
     /// Create a new handle to the memory manager.
-    pub const fn new() -> Self { Self }
+    pub const fn new() -> Self {
+        Self
+    }
 
     /// Allocate
     pub async fn alloc(&self) -> MemoryHandle {
@@ -32,7 +33,11 @@ impl MemoryManager {
             if let Some((idx, _)) = allocs.iter().find_position(|i| !(**i)) {
                 // we found an unallocated buffer, claim it and make a handle to it
                 allocs[idx] = true;
-                break MemoryHandle { len: 0, allocation_idx: idx, mem: BUFFERS[idx].as_ptr() as *mut [u8; BUFFER_SIZE] };
+                break MemoryHandle {
+                    len: 0,
+                    allocation_idx: idx,
+                    mem: unsafe { BUFFERS[idx].as_mut_ptr() as *mut [u8; BUFFER_SIZE] },
+                };
             } else {
                 // no buffer was available, unlock and then wait until we get notified that one is
                 drop(allocs);
@@ -43,7 +48,7 @@ impl MemoryManager {
 }
 
 pub struct MemoryHandle {
-    len: usize,
+    pub(crate) len: usize,
     allocation_idx: usize,
     mem: *mut [u8; BUFFER_SIZE],
 }
@@ -74,3 +79,5 @@ impl DerefMut for MemoryHandle {
         unsafe { &mut ((*self.mem)[0..self.len]) }
     }
 }
+
+unsafe impl Send for MemoryHandle {}

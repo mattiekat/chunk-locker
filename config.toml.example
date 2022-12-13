@@ -1,0 +1,12 @@
+
+[store]
+fs_root_path = ""
+
+[store.s3]
+download_url = ""
+endpoint = ""
+region = ""
+bucket = ""
+key_id = ""
+application_key = ""
+upload_chunk_size = 5000000
