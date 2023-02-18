@@ -1,7 +1,7 @@
+use crate::Hash;
 use async_trait::async_trait;
 use std::io::Read;
 use tokio::io::AsyncRead;
-use crate::Hash;
 
 #[async_trait]
 trait Hasher {

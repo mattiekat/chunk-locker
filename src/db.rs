@@ -1,7 +1,7 @@
+use crate::Hash;
 use async_trait::async_trait;
 use std::path::Path;
 use std::time::SystemTime;
-use crate::Hash;
 
 #[async_trait]
 trait DbLoader {
@@ -38,7 +38,6 @@ trait Db {
     fn snapshot(&self, snapshot: Snapshot) -> eyre::Result<SnapshotInfo>;
     fn snapshots(&self) -> eyre::Result<Vec<SnapshotInfo>>;
 }
-
 
 enum CompressionAlgorithm {}
 
