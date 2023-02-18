@@ -36,6 +36,7 @@ pub struct S3Store {
 }
 
 impl S3Store {
+    #[allow(unused)]
     pub(crate) async fn new() -> Self {
         let config = Config::load();
         let s3_config = config
@@ -90,7 +91,7 @@ impl Store for S3Store {
 
         let mut upload_parts: Vec<CompletedPart> = Vec::new();
 
-        let file_size = mem.len() as usize;
+        let file_size = mem.len();
         let chunk_size = self.upload_chunk_size;
 
         let mut chunk_count = (file_size / chunk_size) + 1;
@@ -187,6 +188,7 @@ impl Store for S3Store {
     }
 }
 
+#[allow(unused)]
 pub async fn example_s3store() {
     let store = S3Store::new().await;
 
@@ -197,7 +199,7 @@ pub async fn example_s3store() {
     let text = b"Hello chunk-locker!";
     let text_len = text.len();
 
-    for i in 0..(BUFFER_SIZE.checked_div(text_len).unwrap()) {
+    for _ in 0..(BUFFER_SIZE.checked_div(text_len).unwrap()) {
         handle.len += text_len;
         let bytes = &mut *handle;
         let range = bytes.len() - text_len..bytes.len();

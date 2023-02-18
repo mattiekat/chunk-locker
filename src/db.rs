@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use crate::Hash;
 use async_trait::async_trait;
 use std::path::Path;
