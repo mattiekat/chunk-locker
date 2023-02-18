@@ -180,62 +180,6 @@ struct ExpectedChunk {
 }
 
 #[test]
-fn test_iter_sekien_16k_chunks() {
-    let contents = fs::read("test/fixtures/SekienAkashita.jpg").unwrap();
-    // The digest values are not needed here, but they serve to validate
-    // that the streaming version tested below is returning the correct
-    // chunk data on each iteration.
-    let expected_chunks = [
-        ExpectedChunk {
-            hash: 17968276318003433923,
-            offset: 0,
-            length: 21325,
-            digest: "2bb52734718194617c957f5e07ee6054".into(),
-        },
-        ExpectedChunk {
-            hash: 8197189939299398838,
-            offset: 21325,
-            length: 17140,
-            digest: "badfb0757fe081c20336902e7131f768".into(),
-        },
-        ExpectedChunk {
-            hash: 13019990849178155730,
-            offset: 38465,
-            length: 28084,
-            digest: "18412d7414de6eb42f638351711f729d".into(),
-        },
-        ExpectedChunk {
-            hash: 4509236223063678303,
-            offset: 66549,
-            length: 18217,
-            digest: "04fe1405fc5f960363bfcd834c056407".into(),
-        },
-        ExpectedChunk {
-            hash: 2504464741100432583,
-            offset: 84766,
-            length: 24700,
-            digest: "1aa7ad95f274d6ba34a983946ebc5af3".into(),
-        },
-    ];
-    let mut chunker = StreamCDC::new(contents.as_slice(), 4096, 16384, 65535);
-    let mut index = 0;
-    while let Some(Ok(chunk)) = chunker.next() {
-        assert_eq!(chunk.hash, expected_chunks[index].hash);
-        assert_eq!(chunk.offset, expected_chunks[index].offset);
-        assert_eq!(chunk.length, expected_chunks[index].length);
-
-        let offset = chunk.offset as usize;
-        let mut hasher = Md5::new();
-        hasher.update(&contents[offset..offset + chunk.length]);
-        let table = hasher.finalize();
-        let digest = format!("{table:x}");
-        assert_eq!(digest, expected_chunks[index].digest);
-        index += 1;
-    }
-    assert_eq!(index, 5);
-}
-
-#[test]
 fn test_cut_sekien_16k_nc_0() {
     let contents = fs::read("test/fixtures/SekienAkashita.jpg").unwrap();
     let mut chunker = StreamCDC::with_level(contents.as_slice(), 4096, 16384, 65535, Normalization::Level0);
@@ -293,7 +237,6 @@ fn test_error_fmt() {
 #[test]
 fn test_stream_sekien_16k_chunks() {
     let file = File::open("test/fixtures/SekienAkashita.jpg").unwrap();
-    // The set of expected results should match the non-streaming version.
     let expected_chunks = [
         ExpectedChunk {
             hash: 17968276318003433923,
