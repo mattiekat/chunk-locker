@@ -480,6 +480,5 @@ impl Iterator for StreamCDC {
 
 /// Base-2 logarithm function for unsigned 32-bit integers.
 fn logarithm2(value: u32) -> u32 {
-    f64::from(value).log2().round() as u32
+    (value as f32).log2().round() as u32
 }
-
