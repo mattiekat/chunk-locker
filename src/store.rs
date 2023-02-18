@@ -3,12 +3,10 @@ pub mod s3;
 use std::ops::Deref;
 use std::path::PathBuf;
 
-use crate::config::Config;
 use crate::memory::BUFFER_SIZE;
 use crate::memory::{MemoryHandle, MemoryManager};
 use crate::Hash;
 use async_trait::async_trait;
-use bytes::Bytes;
 use eyre::Result;
 use serde::Deserialize;
 
@@ -29,6 +27,7 @@ pub trait Store {
 }
 
 #[derive(Deserialize, Debug)]
+#[allow(unused)]
 pub struct StoreConfig {
     s3: Option<S3Config>,
     fs_root_path: Option<String>,
