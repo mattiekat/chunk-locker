@@ -24,7 +24,7 @@
 //! it is computationally cost-free and can be put to some use with additional
 //! record keeping.
 //!
-//! The `StreamCDC` implementation is similar to `FastCDC` except that it will
+//! The `StreamCdc` implementation is similar to `FastCDC` except that it will
 //! read data from a boxed `Read` into an internal buffer of `max_size` and
 //! produce `ChunkData` values from the `Iterator`.
 use std::io::Read;
@@ -120,7 +120,7 @@ impl Default for Normalization {
     }
 }
 
-/// The error type returned from the `StreamCDC` iterator.
+/// The error type returned from the `StreamCdc` iterator.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// End of source data reached.
@@ -133,7 +133,7 @@ pub enum Error {
     Other(String),
 }
 
-/// Represents a chunk returned from the StreamCDC iterator.
+/// Represents a chunk returned from the StreamCdc iterator.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct ChunkData {
     /// The gear hash value as of the end of the chunk.
@@ -156,15 +156,15 @@ pub struct ChunkData {
 ///
 /// ```no_run
 /// # use std::fs::File;
-/// # use fastcdc::v2020::StreamCDC;
+/// # use fastcdc::v2020::StreamCdc;
 /// let source = File::open("test/fixtures/SekienAkashita.jpg").unwrap();
-/// let chunker = StreamCDC::new(Box::new(source), 4096, 16384, 65535);
+/// let chunker = StreamCdc::new(Box::new(source), 4096, 16384, 65535);
 /// for result in chunker {
 ///     let chunk = result.unwrap();
 ///     println!("offset={} length={}", chunk.offset, chunk.length);
 /// }
 /// ```
-pub struct StreamCDC<S> {
+pub struct StreamCdc<S> {
     /// Buffer of data from source for finding cut points.
     buffer: Vec<u8>,
     /// Maximum capacity of the buffer (always `max_size`).
@@ -186,15 +186,15 @@ pub struct StreamCDC<S> {
     mask_l_ls: u64,
 }
 
-impl<S> StreamCDC<S> {
-    /// Construct a `StreamCDC` that will process bytes from the given source.
+impl<S> StreamCdc<S> {
+    /// Construct a `StreamCdc` that will process bytes from the given source.
     ///
     /// Uses chunk size normalization level 1 by default.
     pub fn new(source: S, min_size: u32, avg_size: u32, max_size: u32) -> Self {
-        StreamCDC::with_level(source, min_size, avg_size, max_size, Normalization::Level1)
+        StreamCdc::with_level(source, min_size, avg_size, max_size, Normalization::Level1)
     }
 
-    /// Create a new `StreamCDC` with the given normalization level.
+    /// Create a new `StreamCdc` with the given normalization level.
     pub fn with_level(
         source: S,
         min_size: u32,
@@ -256,7 +256,7 @@ impl<S> StreamCDC<S> {
     }
 }
 
-impl<S: Read> StreamCDC<S> {
+impl<S: Read> StreamCdc<S> {
     /// Fill the buffer with data from the source, returning the number of bytes
     /// read (zero if end of source has been reached).
     fn fill_buffer(&mut self) -> Result<usize, Error> {
@@ -312,7 +312,7 @@ impl<S: Read> StreamCDC<S> {
     }
 }
 
-impl<S: Read> Iterator for StreamCDC<S> {
+impl<S: Read> Iterator for StreamCdc<S> {
     type Item = Result<ChunkData, Error>;
 
     fn next(&mut self) -> Option<Result<ChunkData, Error>> {

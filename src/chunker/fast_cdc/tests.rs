@@ -44,54 +44,54 @@ fn test_logarithm2() {
 #[should_panic]
 fn test_minimum_too_low() {
     let array = [0u8; 1024];
-    StreamCDC::new(array.as_slice(), 63, 256, 1024);
+    StreamCdc::new(array.as_slice(), 63, 256, 1024);
 }
 
 #[test]
 #[should_panic]
 fn test_minimum_too_high() {
     let array = [0u8; 1024];
-    StreamCDC::new(array.as_slice(), 67_108_867, 256, 1024);
+    StreamCdc::new(array.as_slice(), 67_108_867, 256, 1024);
 }
 
 #[test]
 #[should_panic]
 fn test_average_too_low() {
     let array = [0u8; 1024];
-    StreamCDC::new(array.as_slice(), 64, 255, 1024);
+    StreamCdc::new(array.as_slice(), 64, 255, 1024);
 }
 
 #[test]
 #[should_panic]
 fn test_average_too_high() {
     let array = [0u8; 1024];
-    StreamCDC::new(array.as_slice(), 64, 268_435_457, 1024);
+    StreamCdc::new(array.as_slice(), 64, 268_435_457, 1024);
 }
 
 #[test]
 #[should_panic]
 fn test_maximum_too_low() {
     let array = [0u8; 1024];
-    StreamCDC::new(array.as_slice(), 64, 256, 1023);
+    StreamCdc::new(array.as_slice(), 64, 256, 1023);
 }
 
 #[test]
 #[should_panic]
 fn test_maximum_too_high() {
     let array = [0u8; 1024];
-    StreamCDC::new(array.as_slice(), 64, 256, 1_073_741_825);
+    StreamCdc::new(array.as_slice(), 64, 256, 1_073_741_825);
 }
 
 #[test]
 fn test_masks() {
     let source = [0u8; 1024];
-    let chunker = StreamCDC::new(source.as_slice(), 64, 256, 1024);
+    let chunker = StreamCdc::new(source.as_slice(), 64, 256, 1024);
     assert_eq!(chunker.mask_l, MASKS[7]);
     assert_eq!(chunker.mask_s, MASKS[9]);
-    let chunker = StreamCDC::new(source.as_slice(), 8192, 16384, 32768);
+    let chunker = StreamCdc::new(source.as_slice(), 8192, 16384, 32768);
     assert_eq!(chunker.mask_l, MASKS[13]);
     assert_eq!(chunker.mask_s, MASKS[15]);
-    let chunker = StreamCDC::new(source.as_slice(), 1_048_576, 4_194_304, 16_777_216);
+    let chunker = StreamCdc::new(source.as_slice(), 1_048_576, 4_194_304, 16_777_216);
     assert_eq!(chunker.mask_l, MASKS[21]);
     assert_eq!(chunker.mask_s, MASKS[23]);
 }
@@ -100,7 +100,7 @@ fn test_masks() {
 fn test_cut_all_zeros() {
     // for all zeros, always returns chunks of maximum size
     let array = [0u8; 10240];
-    let mut chunker = StreamCDC::new(array.as_slice(), 64, 256, 1024);
+    let mut chunker = StreamCdc::new(array.as_slice(), 64, 256, 1024);
     let mut cursor: usize = 0;
     for _ in 0..10 {
         let ChunkData {
@@ -121,7 +121,7 @@ fn test_cut_all_zeros() {
 #[test]
 fn test_cut_sekien_16k_chunks() {
     let contents = fs::read("test/fixtures/SekienAkashita.jpg").unwrap();
-    let mut chunker = StreamCDC::new(contents.as_slice(), 4096, 16384, 65535);
+    let mut chunker = StreamCdc::new(contents.as_slice(), 4096, 16384, 65535);
     let mut cursor: usize = 0;
     let mut remaining: usize = contents.len();
     let expected = [
@@ -150,7 +150,7 @@ fn test_cut_sekien_16k_chunks() {
 #[test]
 fn test_cut_sekien_32k_chunks() {
     let contents = fs::read("test/fixtures/SekienAkashita.jpg").unwrap();
-    let mut chunker = StreamCDC::new(contents.as_slice(), 8192, 32768, 131072);
+    let mut chunker = StreamCdc::new(contents.as_slice(), 8192, 32768, 131072);
     let mut cursor: usize = 0;
     let mut remaining: usize = contents.len();
     let expected = [(15733367461443853673, 66549), (6321136627705800457, 42917)];
@@ -173,7 +173,7 @@ fn test_cut_sekien_32k_chunks() {
 #[test]
 fn test_cut_sekien_64k_chunks() {
     let contents = fs::read("test/fixtures/SekienAkashita.jpg").unwrap();
-    let mut chunker = StreamCDC::new(contents.as_slice(), 16384, 65536, 262144);
+    let mut chunker = StreamCdc::new(contents.as_slice(), 16384, 65536, 262144);
     let mut cursor: usize = 0;
     let mut remaining: usize = contents.len();
     let expected = [(2504464741100432583, 109466)];
@@ -203,7 +203,7 @@ struct ExpectedChunk {
 #[test]
 fn test_cut_sekien_16k_nc_0() {
     let contents = fs::read("test/fixtures/SekienAkashita.jpg").unwrap();
-    let mut chunker = StreamCDC::with_level(
+    let mut chunker = StreamCdc::with_level(
         contents.as_slice(),
         4096,
         16384,
@@ -238,7 +238,7 @@ fn test_cut_sekien_16k_nc_0() {
 #[test]
 fn test_cut_sekien_16k_nc_3() {
     let contents = fs::read("test/fixtures/SekienAkashita.jpg").unwrap();
-    let mut chunker = StreamCDC::with_level(
+    let mut chunker = StreamCdc::with_level(
         contents.as_slice(),
         8192,
         16384,
@@ -306,7 +306,7 @@ fn test_stream_sekien_16k_chunks() {
             digest: "1aa7ad95f274d6ba34a983946ebc5af3".into(),
         },
     ];
-    let chunker = StreamCDC::new(Box::new(file), 4096, 16384, 65535);
+    let chunker = StreamCdc::new(Box::new(file), 4096, 16384, 65535);
     let mut index = 0;
     for result in chunker {
         let chunk = result.unwrap();
