@@ -35,7 +35,6 @@ mod consts;
 #[cfg(test)]
 mod tests;
 
-
 /// Find the next chunk cut point in the source.
 #[allow(clippy::too_many_arguments)]
 fn cut(
@@ -187,7 +186,7 @@ pub struct StreamCDC<S> {
     mask_l_ls: u64,
 }
 
-impl<S: Read> StreamCDC<S> {
+impl<S> StreamCDC<S> {
     /// Construct a `StreamCDC` that will process bytes from the given source.
     ///
     /// Uses chunk size normalization level 1 by default.
@@ -239,6 +238,25 @@ impl<S: Read> StreamCDC<S> {
         }
     }
 
+    /// Drains a specified number of bytes from the buffer, then resizes the
+    /// buffer back to `capacity` size in preparation for further reads.
+    fn drain_bytes(&mut self, count: usize) -> Result<Vec<u8>, Error> {
+        // this code originally copied from asuran crate
+        if count > self.length {
+            Err(Error::Other(format!(
+                "drain_bytes() called with count larger than length: {} > {}",
+                count, self.length
+            )))
+        } else {
+            let data = self.buffer.drain(..count).collect::<Vec<u8>>();
+            self.length -= count;
+            self.buffer.resize(self.capacity, 0_u8);
+            Ok(data)
+        }
+    }
+}
+
+impl<S: Read> StreamCDC<S> {
     /// Fill the buffer with data from the source, returning the number of bytes
     /// read (zero if end of source has been reached).
     fn fill_buffer(&mut self) -> Result<usize, Error> {
@@ -257,23 +275,6 @@ impl<S: Read> StreamCDC<S> {
                 }
             }
             Ok(all_bytes_read)
-        }
-    }
-
-    /// Drains a specified number of bytes from the buffer, then resizes the
-    /// buffer back to `capacity` size in preparation for further reads.
-    fn drain_bytes(&mut self, count: usize) -> Result<Vec<u8>, Error> {
-        // this code originally copied from asuran crate
-        if count > self.length {
-            Err(Error::Other(format!(
-                "drain_bytes() called with count larger than length: {} > {}",
-                count, self.length
-            )))
-        } else {
-            let data = self.buffer.drain(..count).collect::<Vec<u8>>();
-            self.length -= count;
-            self.buffer.resize(self.capacity, 0_u8);
-            Ok(data)
         }
     }
 
@@ -324,7 +325,7 @@ impl<S: Read> Iterator for StreamCDC<S> {
     }
 }
 
-/// Base-2 logarithm function for unsigned 32-bit integers.
+/// Rounded base-2 logarithm function for unsigned 32-bit integers.
 fn logarithm2(value: u32) -> u32 {
     (value as f32).log2().round() as u32
 }
