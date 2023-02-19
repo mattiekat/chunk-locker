@@ -2,6 +2,7 @@ use std::io::Read;
 
 use once_cell::sync::OnceCell;
 
+use crate::memory::MemoryConfig;
 use serde::Deserialize;
 
 use crate::store::StoreConfig;
@@ -9,6 +10,8 @@ use crate::store::StoreConfig;
 #[derive(Deserialize, Debug)]
 pub struct Config {
     pub store: StoreConfig,
+    #[serde(default)]
+    pub memory: MemoryConfig,
 }
 
 static CONFIG: OnceCell<Config> = OnceCell::new();

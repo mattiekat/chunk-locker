@@ -3,7 +3,6 @@ pub mod s3;
 use std::ops::Deref;
 use std::path::PathBuf;
 
-use crate::memory::BUFFER_SIZE;
 use crate::memory::{MemoryHandle, MemoryManager};
 use crate::Hash;
 use async_trait::async_trait;
@@ -57,8 +56,7 @@ impl Store for FSStore {
         let bytes = tokio::fs::read(path).await?;
         let mut memory = MemoryManager::new().alloc().await;
 
-        memory.len = bytes.len();
-        assert!(bytes.len() < BUFFER_SIZE);
+        memory.update_len(bytes.len());
 
         for (i, byte) in bytes.into_iter().enumerate() {
             memory[i] = byte;

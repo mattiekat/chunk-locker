@@ -1,7 +1,6 @@
 use std::ops::Deref;
 
 use crate::config::Config;
-use crate::memory::BUFFER_SIZE;
 use crate::memory::{MemoryHandle, MemoryManager};
 use crate::Hash;
 use async_trait::async_trait;
@@ -173,9 +172,7 @@ impl Store for S3Store {
             .await?;
 
         let mut handle = MemoryManager::new().alloc().await;
-        let len = bytes.len();
-        assert!(BUFFER_SIZE > len);
-        handle.len = len;
+        handle.update_len(bytes.len());
         handle.copy_from_slice(&bytes);
         Ok(handle)
     }
@@ -199,8 +196,8 @@ pub async fn example_s3store() {
     let text = b"Hello chunk-locker!";
     let text_len = text.len();
 
-    for _ in 0..(BUFFER_SIZE.checked_div(text_len).unwrap()) {
-        handle.len += text_len;
+    for _ in 0..(handle.len().checked_div(text_len).unwrap()) {
+        handle.update_len(handle.len() + text_len);
         let bytes = &mut *handle;
         let range = bytes.len() - text_len..bytes.len();
         bytes[range].copy_from_slice(text);
