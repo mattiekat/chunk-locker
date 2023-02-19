@@ -1,6 +1,7 @@
-use std::fs::{self, File};
-
 use md5::{Digest, Md5};
+use tokio::fs;
+use tokio::fs::File;
+use tokio_stream::StreamExt;
 
 use super::*;
 
@@ -96,11 +97,11 @@ fn test_masks() {
     assert_eq!(chunker.mask_s, MASKS[23]);
 }
 
-#[test]
-fn test_cut_all_zeros() {
+#[tokio::test]
+async fn test_cut_all_zeros() {
     // for all zeros, always returns chunks of maximum size
     let array = [0u8; 10240];
-    let mut chunker = StreamCdc::new(array.as_slice(), 64, 256, 1024);
+    let mut chunker = StreamCdc::new(array.as_slice(), 64, 256, 1024).stream();
     let mut cursor: usize = 0;
     for _ in 0..10 {
         let ChunkData {
@@ -108,19 +109,19 @@ fn test_cut_all_zeros() {
             offset,
             length,
             ..
-        } = chunker.next().unwrap().unwrap();
+        } = chunker.next().await.unwrap().unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, 14169102344523991076);
         assert_eq!(pos, cursor + 1024);
         cursor = pos;
     }
     // assert that nothing more should be returned
-    assert!(matches!(chunker.next(), None));
+    assert!(matches!(chunker.next().await, None));
 }
 
-#[test]
-fn test_cut_sekien_16k_chunks() {
-    let contents = fs::read("test/fixtures/SekienAkashita.jpg").unwrap();
+#[tokio::test]
+async fn test_cut_sekien_16k_chunks() {
+    let contents = fs::read("test/fixtures/SekienAkashita.jpg").await.unwrap();
     let mut chunker = StreamCdc::new(contents.as_slice(), 4096, 16384, 65535);
     let mut cursor: usize = 0;
     let mut remaining: usize = contents.len();
@@ -137,7 +138,7 @@ fn test_cut_sekien_16k_chunks() {
             offset,
             length,
             ..
-        } = chunker.read_chunk().unwrap();
+        } = chunker.read_chunk().await.unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, *e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -147,9 +148,9 @@ fn test_cut_sekien_16k_chunks() {
     assert_eq!(remaining, 0);
 }
 
-#[test]
-fn test_cut_sekien_32k_chunks() {
-    let contents = fs::read("test/fixtures/SekienAkashita.jpg").unwrap();
+#[tokio::test]
+async fn test_cut_sekien_32k_chunks() {
+    let contents = fs::read("test/fixtures/SekienAkashita.jpg").await.unwrap();
     let mut chunker = StreamCdc::new(contents.as_slice(), 8192, 32768, 131072);
     let mut cursor: usize = 0;
     let mut remaining: usize = contents.len();
@@ -160,7 +161,7 @@ fn test_cut_sekien_32k_chunks() {
             offset,
             length,
             ..
-        } = chunker.next().unwrap().unwrap();
+        } = chunker.read_chunk().await.unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, *e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -170,9 +171,9 @@ fn test_cut_sekien_32k_chunks() {
     assert_eq!(remaining, 0);
 }
 
-#[test]
-fn test_cut_sekien_64k_chunks() {
-    let contents = fs::read("test/fixtures/SekienAkashita.jpg").unwrap();
+#[tokio::test]
+async fn test_cut_sekien_64k_chunks() {
+    let contents = fs::read("test/fixtures/SekienAkashita.jpg").await.unwrap();
     let mut chunker = StreamCdc::new(contents.as_slice(), 16384, 65536, 262144);
     let mut cursor: usize = 0;
     let mut remaining: usize = contents.len();
@@ -183,7 +184,7 @@ fn test_cut_sekien_64k_chunks() {
             offset,
             length,
             ..
-        } = chunker.next().unwrap().unwrap();
+        } = chunker.read_chunk().await.unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, *e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -200,9 +201,9 @@ struct ExpectedChunk {
     digest: String,
 }
 
-#[test]
-fn test_cut_sekien_16k_nc_0() {
-    let contents = fs::read("test/fixtures/SekienAkashita.jpg").unwrap();
+#[tokio::test]
+async fn test_cut_sekien_16k_nc_0() {
+    let contents = fs::read("test/fixtures/SekienAkashita.jpg").await.unwrap();
     let mut chunker = StreamCdc::with_level(
         contents.as_slice(),
         4096,
@@ -225,7 +226,7 @@ fn test_cut_sekien_16k_nc_0() {
             offset,
             length,
             ..
-        } = chunker.next().unwrap().unwrap();
+        } = chunker.read_chunk().await.unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -235,9 +236,9 @@ fn test_cut_sekien_16k_nc_0() {
     assert_eq!(remaining, 0);
 }
 
-#[test]
-fn test_cut_sekien_16k_nc_3() {
-    let contents = fs::read("test/fixtures/SekienAkashita.jpg").unwrap();
+#[tokio::test]
+async fn test_cut_sekien_16k_nc_3() {
+    let contents = fs::read("test/fixtures/SekienAkashita.jpg").await.unwrap();
     let mut chunker = StreamCdc::with_level(
         contents.as_slice(),
         8192,
@@ -261,7 +262,7 @@ fn test_cut_sekien_16k_nc_3() {
             offset,
             length,
             ..
-        } = chunker.read_chunk().unwrap();
+        } = chunker.read_chunk().await.unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, *e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -271,9 +272,11 @@ fn test_cut_sekien_16k_nc_3() {
     assert_eq!(remaining, 0);
 }
 
-#[test]
-fn test_stream_sekien_16k_chunks() {
-    let file = File::open("test/fixtures/SekienAkashita.jpg").unwrap();
+#[tokio::test]
+async fn test_stream_sekien_16k_chunks() {
+    let file = File::open("test/fixtures/SekienAkashita.jpg")
+        .await
+        .unwrap();
     let expected_chunks = [
         ExpectedChunk {
             hash: 17968276318003433923,
@@ -306,9 +309,9 @@ fn test_stream_sekien_16k_chunks() {
             digest: "1aa7ad95f274d6ba34a983946ebc5af3".into(),
         },
     ];
-    let chunker = StreamCdc::new(Box::new(file), 4096, 16384, 65535);
+    let mut chunker = StreamCdc::new(Box::new(file), 4096, 16384, 65535).stream();
     let mut index = 0;
-    for result in chunker {
+    while let Some(result) = chunker.next().await {
         let chunk = result.unwrap();
         assert_eq!(chunk.hash, expected_chunks[index].hash);
         assert_eq!(chunk.offset, expected_chunks[index].offset);

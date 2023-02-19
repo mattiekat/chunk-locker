@@ -27,7 +27,10 @@
 //! The `StreamCdc` implementation is similar to `FastCDC` except that it will
 //! read data from a boxed `Read` into an internal buffer of `max_size` and
 //! produce `ChunkData` values from the `Iterator`.
-use std::io::Read;
+use async_stream::stream;
+use std::pin::Pin;
+use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio_stream::Stream;
 
 pub use consts::*;
 
@@ -245,17 +248,30 @@ impl<S> StreamCdc<S> {
     }
 }
 
-impl<S: Read> StreamCdc<S> {
+impl<S: AsyncRead + Unpin> StreamCdc<S> {
+    pub fn stream(mut self) -> Pin<Box<impl Stream<Item = Result<ChunkData, Error>>>> {
+        Box::pin(stream! {
+            loop {
+                let slice = self.read_chunk().await;
+                if let Err(Error::Empty) = slice {
+                    break
+                } else {
+                    yield slice
+                }
+            }
+        })
+    }
+
     /// Fill the buffer with data from the source, returning the number of bytes
     /// read (zero if end of source has been reached).
-    fn fill_buffer(&mut self) -> Result<usize, Error> {
+    async fn fill_buffer(&mut self) -> Result<usize, Error> {
         // this code originally copied from asuran crate
         if self.eof {
             Ok(0)
         } else {
             let mut all_bytes_read = 0;
             while !self.eof && self.length < self.capacity {
-                let bytes_read = self.source.read(&mut self.buffer[self.length..])?;
+                let bytes_read = self.source.read(&mut self.buffer[self.length..]).await?;
                 if bytes_read == 0 {
                     self.eof = true;
                 } else {
@@ -269,8 +285,8 @@ impl<S: Read> StreamCdc<S> {
 
     /// Find the next chunk in the source. If the end of the source has been
     /// reached, returns `Error::Empty` as the error.
-    fn read_chunk(&mut self) -> Result<ChunkData, Error> {
-        self.fill_buffer()?;
+    async fn read_chunk(&mut self) -> Result<ChunkData, Error> {
+        self.fill_buffer().await?;
         if self.length == 0 {
             Err(Error::Empty)
         } else {
@@ -288,19 +304,6 @@ impl<S: Read> StreamCdc<S> {
                     data,
                 })
             }
-        }
-    }
-}
-
-impl<S: Read> Iterator for StreamCdc<S> {
-    type Item = Result<ChunkData, Error>;
-
-    fn next(&mut self) -> Option<Result<ChunkData, Error>> {
-        let slice = self.read_chunk();
-        if let Err(Error::Empty) = slice {
-            None
-        } else {
-            Some(slice)
         }
     }
 }
