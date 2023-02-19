@@ -101,7 +101,7 @@ fn test_masks() {
 async fn test_cut_all_zeros() {
     // for all zeros, always returns chunks of maximum size
     let array = [0u8; 10240];
-    let mut chunker = StreamCdc::new(array.as_slice(), 64, 256, 1024).stream();
+    let mut chunker = StreamCdc::new(array.as_slice(), 64, 256, 1024);
     let mut cursor: usize = 0;
     for _ in 0..10 {
         let ChunkData {
@@ -109,14 +109,14 @@ async fn test_cut_all_zeros() {
             offset,
             length,
             ..
-        } = chunker.next().await.unwrap().unwrap();
+        } = chunker.read_chunk().await.unwrap().unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, 14169102344523991076);
         assert_eq!(pos, cursor + 1024);
         cursor = pos;
     }
     // assert that nothing more should be returned
-    assert!(matches!(chunker.next().await, None));
+    assert!(matches!(chunker.read_chunk().await, Ok(None)));
 }
 
 #[tokio::test]
@@ -138,7 +138,7 @@ async fn test_cut_sekien_16k_chunks() {
             offset,
             length,
             ..
-        } = chunker.read_chunk().await.unwrap();
+        } = chunker.read_chunk().await.unwrap().unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, *e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -161,7 +161,7 @@ async fn test_cut_sekien_32k_chunks() {
             offset,
             length,
             ..
-        } = chunker.read_chunk().await.unwrap();
+        } = chunker.read_chunk().await.unwrap().unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, *e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -184,7 +184,7 @@ async fn test_cut_sekien_64k_chunks() {
             offset,
             length,
             ..
-        } = chunker.read_chunk().await.unwrap();
+        } = chunker.read_chunk().await.unwrap().unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, *e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -226,7 +226,7 @@ async fn test_cut_sekien_16k_nc_0() {
             offset,
             length,
             ..
-        } = chunker.read_chunk().await.unwrap();
+        } = chunker.read_chunk().await.unwrap().unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -262,7 +262,7 @@ async fn test_cut_sekien_16k_nc_3() {
             offset,
             length,
             ..
-        } = chunker.read_chunk().await.unwrap();
+        } = chunker.read_chunk().await.unwrap().unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, *e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -309,7 +309,62 @@ async fn test_stream_sekien_16k_chunks() {
             digest: "1aa7ad95f274d6ba34a983946ebc5af3".into(),
         },
     ];
-    let mut chunker = StreamCdc::new(Box::new(file), 4096, 16384, 65535).stream();
+    let mut chunker = StreamCdc::new(Box::new(file), 4096, 16384, 65535).into_stream();
+    let mut index = 0;
+    while let Some(result) = chunker.next().await {
+        let chunk = result.unwrap();
+        assert_eq!(chunk.hash, expected_chunks[index].hash);
+        assert_eq!(chunk.offset, expected_chunks[index].offset);
+        assert_eq!(chunk.length, expected_chunks[index].length);
+        let mut hasher = Md5::new();
+        hasher.update(&chunk.data);
+        let table = hasher.finalize();
+        let digest = format!("{table:x}");
+        assert_eq!(digest, expected_chunks[index].digest);
+        index += 1;
+    }
+    assert_eq!(index, 5);
+}
+
+#[tokio::test]
+async fn test_borrowed_stream_sekien_16k_chunks() {
+    let file = File::open("test/fixtures/SekienAkashita.jpg")
+        .await
+        .unwrap();
+    let expected_chunks = [
+        ExpectedChunk {
+            hash: 17968276318003433923,
+            offset: 0,
+            length: 21325,
+            digest: "2bb52734718194617c957f5e07ee6054".into(),
+        },
+        ExpectedChunk {
+            hash: 8197189939299398838,
+            offset: 21325,
+            length: 17140,
+            digest: "badfb0757fe081c20336902e7131f768".into(),
+        },
+        ExpectedChunk {
+            hash: 13019990849178155730,
+            offset: 38465,
+            length: 28084,
+            digest: "18412d7414de6eb42f638351711f729d".into(),
+        },
+        ExpectedChunk {
+            hash: 4509236223063678303,
+            offset: 66549,
+            length: 18217,
+            digest: "04fe1405fc5f960363bfcd834c056407".into(),
+        },
+        ExpectedChunk {
+            hash: 2504464741100432583,
+            offset: 84766,
+            length: 24700,
+            digest: "1aa7ad95f274d6ba34a983946ebc5af3".into(),
+        },
+    ];
+    let mut fastcdc = StreamCdc::new(Box::new(file), 4096, 16384, 65535);
+    let mut chunker = fastcdc.stream();
     let mut index = 0;
     while let Some(result) = chunker.next().await {
         let chunk = result.unwrap();

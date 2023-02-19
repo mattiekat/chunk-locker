@@ -53,6 +53,7 @@ mod tests;
 /// value of zero since no calculations are performed for sub-minimum chunks.
 #[repr(u8)]
 #[derive(Copy, Clone, Eq, PartialEq)]
+#[allow(unused)]
 pub enum Normalization {
     /// No chunk size normalization, produces a wide range of chunk sizes.
     Level0 = 0,
@@ -73,9 +74,6 @@ impl Default for Normalization {
 /// The error type returned from the `StreamCdc` iterator.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// End of source data reached.
-    #[error("Reached end of data source")]
-    Empty,
     /// An I/O error occurred.
     #[error("IO Error: {0:?}")]
     IoError(#[from] std::io::Error),
@@ -249,15 +247,18 @@ impl<S> StreamCdc<S> {
 }
 
 impl<S: AsyncRead + Unpin> StreamCdc<S> {
-    pub fn stream(mut self) -> Pin<Box<impl Stream<Item = Result<ChunkData, Error>>>> {
+    pub fn into_stream(mut self) -> Pin<Box<impl Stream<Item = Result<ChunkData, Error>>>> {
         Box::pin(stream! {
-            loop {
-                let slice = self.read_chunk().await;
-                if let Err(Error::Empty) = slice {
-                    break
-                } else {
-                    yield slice
-                }
+            while let Some(slice) = self.read_chunk().await.transpose() {
+                yield slice
+            }
+        })
+    }
+
+    pub fn stream<'a>(&'a mut self) -> Pin<Box<impl Stream<Item = Result<ChunkData, Error>> + 'a>> {
+        Box::pin(stream! {
+            while let Some(slice) = self.read_chunk().await.transpose() {
+                yield slice
             }
         })
     }
@@ -285,24 +286,24 @@ impl<S: AsyncRead + Unpin> StreamCdc<S> {
 
     /// Find the next chunk in the source. If the end of the source has been
     /// reached, returns `Error::Empty` as the error.
-    async fn read_chunk(&mut self) -> Result<ChunkData, Error> {
+    async fn read_chunk(&mut self) -> Result<Option<ChunkData>, Error> {
         self.fill_buffer().await?;
         if self.length == 0 {
-            Err(Error::Empty)
+            Ok(None)
         } else {
             let (hash, count) = self.cut();
             if count == 0 {
-                Err(Error::Empty)
+                Ok(None)
             } else {
                 let offset = self.processed;
                 self.processed += count as u64;
                 let data = self.drain_bytes(count)?;
-                Ok(ChunkData {
+                Ok(Some(ChunkData {
                     hash,
                     offset,
                     length: count,
                     data,
-                })
+                }))
             }
         }
     }
