@@ -57,12 +57,15 @@ impl MemoryManagerData {
             .expect("Invalid buffer size or count");
         let buffers = unsafe { alloc(buffers_layout) };
 
-        let integers_needed = cfg.buffer_count / S + if cfg.buffer_size % S == 0 { 0 } else { 1 };
+        let integers_needed = cfg.buffer_count / S + if cfg.buffer_count % S == 0 { 0 } else { 1 };
         let allocations_layout = Layout::from_size_align(integers_needed * S, S).unwrap();
-        let raw_allocations = unsafe { alloc_zeroed(allocations_layout) } as *mut usize;
-        let allocations = Mutex::const_new(BitSlice::from_slice_mut(unsafe {
-            slice::from_raw_parts_mut(raw_allocations, integers_needed)
-        }));
+        let allocations = {
+            let raw_allocations = unsafe { alloc_zeroed(allocations_layout) } as *mut usize;
+            let slice_allocations =
+                unsafe { slice::from_raw_parts_mut(raw_allocations, integers_needed) };
+            let mut allocations = BitSlice::from_slice_mut(slice_allocations);
+            Mutex::const_new(allocations)
+        };
 
         Self {
             cfg,
@@ -110,29 +113,40 @@ impl MemoryManager {
         loop {
             let mut allocs = self.0.allocations.lock().await;
 
-            let first_zero = allocs.first_zero();
-            if let Some(idx) = first_zero {
-                // we found an unallocated buffer, claim it and make a handle to it
-                unsafe {
-                    // we know the size of the allocations must contain idx
-                    allocs.set_unchecked(idx, true);
-                }
-                break MemoryHandle {
-                    max_len: self.0.cfg.buffer_size,
-                    len: 0,
-                    allocation_idx: idx,
-                    mem: unsafe {
-                        // we defined the buffer as buffer_count * buffer_size and can just offset by a
-                        // buffer size each time to get the next buffer
-                        self.0.buffers.add(idx * self.0.cfg.buffer_size)
-                    },
+            let idx = {
+                let first_zero = allocs.first_zero();
+                if first_zero.is_none()
+                    || unsafe { first_zero.unwrap_unchecked() } >= self.0.cfg.buffer_count
+                {
+                    // no buffer was available, unlock and then wait until we get notified that one is
+                    drop(allocs);
+                    self.0.notify.notified().await;
+                    continue;
                 };
-            } else {
-                // no buffer was available, unlock and then wait until we get notified that one is
-                drop(allocs);
-                self.0.notify.notified().await
+                unsafe { first_zero.unwrap_unchecked() }
+            };
+
+            // we found an unallocated buffer, claim it and make a handle to it
+            unsafe {
+                // we know the size of the allocations must contain idx
+                allocs.set_unchecked(idx, true);
             }
+            break MemoryHandle {
+                max_len: self.0.cfg.buffer_size,
+                len: 0,
+                allocation_idx: idx,
+                mem: unsafe {
+                    // we defined the buffer as buffer_count * buffer_size and can just offset by a
+                    // buffer size each time to get the next buffer
+                    self.0.buffers.add(idx * self.0.cfg.buffer_size)
+                },
+            };
         }
+    }
+
+    pub async fn allocations(&self) -> usize {
+        let mut allocs = self.0.allocations.lock().await;
+        allocs.count_ones()
     }
 
     async fn dealloc(&self, idx: usize) {
@@ -201,3 +215,24 @@ impl DerefMut for MemoryHandle {
 }
 
 unsafe impl Send for MemoryHandle {}
+
+#[cfg(test)]
+mod tests {
+    use crate::config::Config;
+    use crate::memory::MemoryManager;
+    use crate::STATIC_TEST_MUTEX;
+    use std::ops::Deref;
+
+    #[test]
+    fn get_handle() {
+        assert_eq!(MemoryManager::new().buffer_size(), 1024 * 1024 * 8)
+    }
+
+    #[tokio::test]
+    async fn allocations() {
+        let _guard = STATIC_TEST_MUTEX.lock();
+        let manager = MemoryManager::new();
+        let h = manager.0.allocations.lock().await;
+        assert!(h.len() >= manager.0.cfg.buffer_count);
+    }
+}
