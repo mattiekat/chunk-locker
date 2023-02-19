@@ -27,7 +27,6 @@
 //! The `StreamCDC` implementation is similar to `FastCDC` except that it will
 //! read data from a boxed `Read` into an internal buffer of `max_size` and
 //! produce `ChunkData` values from the `Iterator`.
-use std::fmt;
 use std::io::Read;
 
 pub use consts::*;
@@ -102,62 +101,42 @@ fn cut(
 /// Note that higher levels of normalization may result in the final chunk of
 /// data being smaller than the minimum chunk size, which results in a hash
 /// value of zero since no calculations are performed for sub-minimum chunks.
+#[repr(u8)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub enum Normalization {
     /// No chunk size normalization, produces a wide range of chunk sizes.
-    Level0,
+    Level0 = 0,
     /// Level 1 normalization, in which fewer chunks are outside of the desired range.
-    Level1,
+    Level1 = 1,
     /// Level 2 normalization, where most chunks are of the desired size.
-    Level2,
+    Level2 = 2,
     /// Level 3 normalization, nearly all chunks are the desired size.
-    Level3,
+    Level3 = 3,
+}
+
+impl Default for Normalization {
+    fn default() -> Self {
+        Self::Level1
+    }
 }
 
 impl Normalization {
-    fn bits(&self) -> u32 {
-        match self {
-            Normalization::Level0 => 0,
-            Normalization::Level1 => 1,
-            Normalization::Level2 => 2,
-            Normalization::Level3 => 3,
-        }
+    fn bits(self) -> u32 {
+        self as u32
     }
-}
-
-/// Represents a chunk returned from the FastCDC iterator.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
-pub struct Chunk {
-    /// The gear hash value as of the end of the chunk.
-    pub hash: u64,
-    /// Starting byte position within the source.
-    pub offset: usize,
-    /// Length of the chunk in bytes.
-    pub length: usize,
 }
 
 /// The error type returned from the `StreamCDC` iterator.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// End of source data reached.
+    #[error("Reached end of data source")]
     Empty,
     /// An I/O error occurred.
-    IoError(std::io::Error),
-    /// Something unexpected happened.
+    #[error("IO Error: {0:?}")]
+    IoError(#[from] std::io::Error),
+    #[error("Chunker Error: {0}")]
     Other(String),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "chunker error: {self:?}")
-    }
-}
-
-impl std::error::Error for Error {}
-
-impl From<std::io::Error> for Error {
-    fn from(error: std::io::Error) -> Self {
-        Error::IoError(error)
-    }
 }
 
 /// Represents a chunk returned from the StreamCDC iterator.
@@ -229,12 +208,15 @@ impl<S: Read> StreamCDC<S> {
         max_size: u32,
         level: Normalization,
     ) -> Self {
-        assert!(min_size >= MINIMUM_MIN);
-        assert!(min_size <= MINIMUM_MAX);
-        assert!(avg_size >= AVERAGE_MIN);
-        assert!(avg_size <= AVERAGE_MAX);
-        assert!(max_size >= MAXIMUM_MIN);
-        assert!(max_size <= MAXIMUM_MAX);
+        assert!(min_size >= MINIMUM_MIN, "Minimum chunk size is too small");
+        assert!(min_size <= MINIMUM_MAX, "Minimum chunk size is too large");
+        assert!(avg_size >= AVERAGE_MIN, "Average chunk size is too small");
+        assert!(avg_size <= AVERAGE_MAX, "Average chunk size is too large");
+        assert!(max_size >= MAXIMUM_MIN, "Maximum chunk size is too small");
+        assert!(max_size <= MAXIMUM_MAX, "Maximum chunk size is too large");
+        assert!(min_size <= avg_size, "Average size must be greater than the minimum size");
+        assert!(avg_size <= max_size, "Maximum size must be greater than the average size");
+
         let bits = logarithm2(avg_size);
         let normalization = level.bits();
         let mask_s = MASKS[(bits + normalization) as usize];

@@ -101,14 +101,14 @@ fn test_cut_all_zeros() {
     let mut chunker = StreamCDC::new(array.as_slice(), 64, 256, 1024);
     let mut cursor: usize = 0;
     for _ in 0..10 {
-        let ChunkData { hash, offset, length, .. } = chunker.read_chunk().unwrap();
+        let ChunkData { hash, offset, length, .. } = chunker.next().unwrap().unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, 14169102344523991076);
         assert_eq!(pos, cursor + 1024);
         cursor = pos;
     }
     // assert that nothing more should be returned
-    assert!(matches!(chunker.read_chunk(), Err(Error::Empty)));
+    assert!(matches!(chunker.next(), None));
 }
 
 #[test]
@@ -144,7 +144,7 @@ fn test_cut_sekien_32k_chunks() {
     let expected =
         [(15733367461443853673, 66549), (6321136627705800457, 42917)];
     for (e_hash, e_length) in expected.iter() {
-        let ChunkData { hash, offset, length, .. } = chunker.read_chunk().unwrap();
+        let ChunkData { hash, offset, length, .. } = chunker.next().unwrap().unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, *e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -162,7 +162,7 @@ fn test_cut_sekien_64k_chunks() {
     let mut remaining: usize = contents.len();
     let expected = [(2504464741100432583, 109466)];
     for (e_hash, e_length) in expected.iter() {
-        let ChunkData { hash, offset, length, .. } = chunker.read_chunk().unwrap();
+        let ChunkData { hash, offset, length, .. } = chunker.next().unwrap().unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, *e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -193,7 +193,7 @@ fn test_cut_sekien_16k_nc_0() {
         (6321136627705800457, 12083),
     ];
     for &(e_hash, e_length) in expected.iter() {
-        let ChunkData { hash, offset, length, .. } = chunker.read_chunk().unwrap();
+        let ChunkData { hash, offset, length, .. } = chunker.next().unwrap().unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -226,12 +226,6 @@ fn test_cut_sekien_16k_nc_3() {
         remaining -= e_length;
     }
     assert_eq!(remaining, 0);
-}
-
-#[test]
-fn test_error_fmt() {
-    let err = Error::Empty;
-    assert_eq!(format!("{err}"), "chunker error: Empty");
 }
 
 #[test]
