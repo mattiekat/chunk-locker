@@ -1,3 +1,5 @@
+extern crate core;
+
 mod chunker;
 mod compressor;
 mod config;

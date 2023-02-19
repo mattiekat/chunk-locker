@@ -4,11 +4,12 @@
 
 use std::alloc::{alloc, alloc_zeroed, dealloc, Layout};
 use std::mem::{size_of, swap};
-use std::ops::{Deref, DerefMut};
 use std::ptr::null_mut;
-use std::slice;
+use std::{cmp, slice};
 
 use bitvec::prelude::BitSlice;
+use bytes::buf::UninitSlice;
+use bytes::{Buf, BufMut};
 use once_cell::sync::OnceCell;
 use serde::Deserialize;
 use tokio::sync::{Mutex, Notify};
@@ -59,11 +60,10 @@ impl MemoryManagerData {
 
         let integers_needed = cfg.buffer_count / S + if cfg.buffer_count % S == 0 { 0 } else { 1 };
         let allocations_layout = Layout::from_size_align(integers_needed * S, S).unwrap();
-        let allocations = {
-            let raw_allocations = unsafe { alloc_zeroed(allocations_layout) } as *mut usize;
-            let slice_allocations =
-                unsafe { slice::from_raw_parts_mut(raw_allocations, integers_needed) };
-            let mut allocations = BitSlice::from_slice_mut(slice_allocations);
+        let allocations = unsafe {
+            let raw_allocations = alloc_zeroed(allocations_layout) as *mut usize;
+            let slice_allocations = slice::from_raw_parts_mut(raw_allocations, integers_needed);
+            let allocations = BitSlice::from_slice_mut(slice_allocations);
             Mutex::const_new(allocations)
         };
 
@@ -113,17 +113,16 @@ impl MemoryManager {
         loop {
             let mut allocs = self.0.allocations.lock().await;
 
-            let idx = {
+            let idx = unsafe {
                 let first_zero = allocs.first_zero();
-                if first_zero.is_none()
-                    || unsafe { first_zero.unwrap_unchecked() } >= self.0.cfg.buffer_count
+                if first_zero.is_none() || first_zero.unwrap_unchecked() >= self.0.cfg.buffer_count
                 {
                     // no buffer was available, unlock and then wait until we get notified that one is
                     drop(allocs);
                     self.0.notify.notified().await;
                     continue;
                 };
-                unsafe { first_zero.unwrap_unchecked() }
+                first_zero.unwrap_unchecked()
             };
 
             // we found an unallocated buffer, claim it and make a handle to it
@@ -144,8 +143,9 @@ impl MemoryManager {
         }
     }
 
+    #[allow(unused)]
     pub async fn allocations(&self) -> usize {
-        let mut allocs = self.0.allocations.lock().await;
+        let allocs = self.0.allocations.lock().await;
         allocs.count_ones()
     }
 
@@ -171,11 +171,16 @@ pub struct MemoryHandle {
 
 impl MemoryHandle {
     #[allow(unused)]
-    pub(crate) fn max_len(&self) -> usize {
+    pub const fn max_len(&self) -> usize {
         self.max_len
     }
 
-    pub(crate) fn update_len(&mut self, len: usize) {
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Unsafe because it may be going into uninitialized memory.
+    pub(crate) unsafe fn update_len(&mut self, len: usize) {
         assert!(
             len <= self.max_len,
             "New length is too large for the configured buffer size"
@@ -183,8 +188,48 @@ impl MemoryHandle {
         unsafe { self.update_len_unchecked(len) }
     }
 
+    /// Unsafe because it may be going into uninitialized memory and does not validate the bounds.
     pub(crate) unsafe fn update_len_unchecked(&mut self, len: usize) {
         self.len = len;
+    }
+
+    pub const fn as_slice(&self) -> &[u8] {
+        // we can safely do this because we know that we are the only handle referencing this buffer
+        unsafe { slice::from_raw_parts(self.mem, self.len) }
+    }
+
+    pub fn as_slice_mut(&mut self) -> &mut [u8] {
+        // we can safely do this because we know that we are the only handle referencing this buffer
+        unsafe { slice::from_raw_parts_mut(self.mem, self.len) }
+    }
+
+    /// Get access to the full buffer space which may not be fully initialized
+    pub fn uninit_slice_mut(&mut self) -> &mut UninitSlice {
+        unsafe { UninitSlice::from_raw_parts_mut(self.mem, self.max_len) }
+    }
+
+    pub const fn cursor(&self) -> MemoryCursor {
+        self.cursor_from(0)
+    }
+
+    pub const fn cursor_from(&self, offset: usize) -> MemoryCursor {
+        assert!(offset < self.len);
+        MemoryCursor {
+            handle: self,
+            offset,
+        }
+    }
+
+    pub fn cursor_mut(&mut self) -> MutMemoryCursor {
+        self.cursor_mut_from(0)
+    }
+
+    pub fn cursor_mut_from(&mut self, offset: usize) -> MutMemoryCursor {
+        assert!(offset <= self.len);
+        MutMemoryCursor {
+            handle: self,
+            offset,
+        }
     }
 }
 
@@ -198,30 +243,89 @@ impl Drop for MemoryHandle {
     }
 }
 
-impl Deref for MemoryHandle {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        // we can safely do this because we know that we are the only handle referencing this buffer
-        unsafe { slice::from_raw_parts(self.mem, self.len) }
+impl AsRef<[u8]> for MemoryHandle {
+    fn as_ref(&self) -> &[u8] {
+        self.as_slice()
     }
 }
 
-impl DerefMut for MemoryHandle {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        // we can safely do this because we know that we are the only handle referencing this buffer
-        unsafe { slice::from_raw_parts_mut(self.mem, self.len) }
+impl AsMut<[u8]> for MemoryHandle {
+    fn as_mut(&mut self) -> &mut [u8] {
+        self.as_slice_mut()
+    }
+}
+
+impl<'buf> From<&'buf MemoryHandle> for MemoryCursor<'buf> {
+    fn from(value: &'buf MemoryHandle) -> Self {
+        value.cursor()
+    }
+}
+
+impl<'buf> From<&'buf mut MemoryHandle> for MutMemoryCursor<'buf> {
+    fn from(value: &'buf mut MemoryHandle) -> Self {
+        value.cursor_mut()
     }
 }
 
 unsafe impl Send for MemoryHandle {}
 
+pub struct MemoryCursor<'buf> {
+    handle: &'buf MemoryHandle,
+    offset: usize,
+}
+
+pub struct MutMemoryCursor<'buf> {
+    handle: &'buf mut MemoryHandle,
+    offset: usize,
+}
+
+impl<'buf> Buf for MemoryCursor<'buf> {
+    fn remaining(&self) -> usize {
+        self.handle.len - self.offset
+    }
+
+    fn chunk(&self) -> &[u8] {
+        &self.handle.as_slice()[self.offset..]
+    }
+
+    fn advance(&mut self, cnt: usize) {
+        assert!(
+            cnt <= self.remaining(),
+            "Cannot advance beyond the end of memory"
+        );
+        self.offset += cnt;
+    }
+}
+
+unsafe impl<'buf> BufMut for MutMemoryCursor<'buf> {
+    fn remaining_mut(&self) -> usize {
+        self.handle.max_len - self.offset
+    }
+
+    unsafe fn advance_mut(&mut self, cnt: usize) {
+        assert!(
+            cnt <= self.remaining_mut(),
+            "Cannot advance beyond the end of memory"
+        );
+        self.offset += cnt;
+        self.handle
+            .update_len(cmp::max(self.handle.len, self.offset.saturating_sub(1)))
+    }
+
+    fn chunk_mut(&mut self) -> &mut UninitSlice {
+        &mut self.handle.uninit_slice_mut()[self.offset..]
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::config::Config;
+    use futures::FutureExt;
+    use tokio::task::yield_now;
+
+    // NOTE: in these tests you do need to do the drop and yield or else it won't fully clean up
+    // between tests.
     use crate::memory::MemoryManager;
     use crate::STATIC_TEST_MUTEX;
-    use std::ops::Deref;
 
     #[test]
     fn get_handle() {
@@ -234,5 +338,95 @@ mod tests {
         let manager = MemoryManager::new();
         let h = manager.0.allocations.lock().await;
         assert!(h.len() >= manager.0.cfg.buffer_count);
+    }
+
+    #[tokio::test]
+    async fn alloc() {
+        let _guard = STATIC_TEST_MUTEX.lock();
+        let manager = MemoryManager::new();
+
+        let h = manager.alloc().await;
+        assert_eq!(manager.allocations().await, 1);
+
+        assert_eq!(h.max_len, 1024 * 1024 * 8);
+        assert_eq!(h.allocation_idx, 0);
+        assert_eq!(h.len, 0);
+
+        drop(h);
+        yield_now().await;
+        assert_eq!(manager.allocations().await, 0);
+    }
+
+    #[tokio::test]
+    async fn multiple_alloc() {
+        let _guard = STATIC_TEST_MUTEX.lock();
+        let manager = MemoryManager::new();
+
+        assert_eq!(manager.allocations().await, 0);
+
+        let a = manager.alloc().await;
+        let b = manager.alloc().await;
+        let c = manager.alloc().await;
+        let d = manager
+            .alloc()
+            .now_or_never()
+            .expect("Should work with opening since we have static test mutex locked");
+
+        assert_eq!(manager.allocations().await, 4);
+
+        assert_ne!(a.allocation_idx, b.allocation_idx);
+        assert_ne!(a.allocation_idx, c.allocation_idx);
+        assert_ne!(a.allocation_idx, d.allocation_idx);
+        assert_ne!(b.allocation_idx, c.allocation_idx);
+        assert_ne!(b.allocation_idx, d.allocation_idx);
+        assert_ne!(c.allocation_idx, d.allocation_idx);
+
+        assert!(manager.alloc().now_or_never().is_none());
+
+        drop([a, b, c, d]);
+        yield_now().await;
+        assert_eq!(manager.allocations().await, 0);
+
+        assert!(manager.alloc().now_or_never().is_some());
+        yield_now().await;
+        assert_eq!(manager.allocations().await, 0);
+    }
+
+    #[tokio::test]
+    async fn increase_bounds() {
+        let _guard = STATIC_TEST_MUTEX.lock();
+        let manager = MemoryManager::new();
+
+        let mut m = manager.alloc().await;
+        unsafe { m.update_len(m.max_len) };
+        assert_eq!(m.len(), m.max_len());
+        assert_eq!(m.len(), m.len);
+        assert_eq!(m.len(), 1024 * 1024 * 8);
+
+        drop(m);
+        yield_now().await;
+    }
+
+    #[tokio::test]
+    async fn write_basic() {
+        let _guard = STATIC_TEST_MUTEX.lock();
+        let manager = MemoryManager::new();
+
+        let mut m = manager.alloc().await;
+        unsafe { m.update_len(4) };
+        let s = m.as_slice_mut();
+        assert_eq!(s.len(), 4);
+        s[0] = 1;
+        s[1] = 2;
+        s[2] = 4;
+        s[3] = 6;
+
+        assert_eq!(s[0], 1);
+        assert_eq!(s[1], 2);
+        assert_eq!(s[2], 4);
+        assert_eq!(s[3], 6);
+
+        drop(m);
+        yield_now().await;
     }
 }

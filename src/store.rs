@@ -1,11 +1,11 @@
 pub mod s3;
 
-use std::ops::Deref;
 use std::path::PathBuf;
 
 use crate::memory::{MemoryHandle, MemoryManager};
 use crate::Hash;
 use async_trait::async_trait;
+use bytes::BufMut;
 use eyre::Result;
 use serde::Deserialize;
 
@@ -44,7 +44,7 @@ impl Store for FSStore {
         let mut path = self.root.clone();
         path.push(format!("{hash}"));
 
-        let bytes = mem.deref();
+        let bytes = mem.as_slice();
         tokio::fs::write(&path, bytes).await?;
         Ok(())
     }
@@ -56,11 +56,7 @@ impl Store for FSStore {
         let bytes = tokio::fs::read(path).await?;
         let mut memory = MemoryManager::new().alloc().await;
 
-        memory.update_len(bytes.len());
-
-        for (i, byte) in bytes.into_iter().enumerate() {
-            memory[i] = byte;
-        }
+        memory.cursor_mut().put_slice(&bytes);
 
         Ok(memory)
     }
