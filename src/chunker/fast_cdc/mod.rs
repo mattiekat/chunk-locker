@@ -214,8 +214,14 @@ impl<S: Read> StreamCDC<S> {
         assert!(avg_size <= AVERAGE_MAX, "Average chunk size is too large");
         assert!(max_size >= MAXIMUM_MIN, "Maximum chunk size is too small");
         assert!(max_size <= MAXIMUM_MAX, "Maximum chunk size is too large");
-        assert!(min_size <= avg_size, "Average size must be greater than the minimum size");
-        assert!(avg_size <= max_size, "Maximum size must be greater than the average size");
+        assert!(
+            min_size <= avg_size,
+            "Average size must be greater than the minimum size"
+        );
+        assert!(
+            avg_size <= max_size,
+            "Maximum size must be greater than the average size"
+        );
 
         let bits = logarithm2(avg_size);
         let normalization = level.bits();

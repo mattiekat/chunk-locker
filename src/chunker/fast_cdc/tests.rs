@@ -101,7 +101,12 @@ fn test_cut_all_zeros() {
     let mut chunker = StreamCDC::new(array.as_slice(), 64, 256, 1024);
     let mut cursor: usize = 0;
     for _ in 0..10 {
-        let ChunkData { hash, offset, length, .. } = chunker.next().unwrap().unwrap();
+        let ChunkData {
+            hash,
+            offset,
+            length,
+            ..
+        } = chunker.next().unwrap().unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, 14169102344523991076);
         assert_eq!(pos, cursor + 1024);
@@ -125,7 +130,12 @@ fn test_cut_sekien_16k_chunks() {
         (2504464741100432583, 24700),
     ];
     for (e_hash, e_length) in expected.iter() {
-        let ChunkData { hash, offset, length, .. } = chunker.read_chunk().unwrap();
+        let ChunkData {
+            hash,
+            offset,
+            length,
+            ..
+        } = chunker.read_chunk().unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, *e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -141,10 +151,14 @@ fn test_cut_sekien_32k_chunks() {
     let mut chunker = StreamCDC::new(contents.as_slice(), 8192, 32768, 131072);
     let mut cursor: usize = 0;
     let mut remaining: usize = contents.len();
-    let expected =
-        [(15733367461443853673, 66549), (6321136627705800457, 42917)];
+    let expected = [(15733367461443853673, 66549), (6321136627705800457, 42917)];
     for (e_hash, e_length) in expected.iter() {
-        let ChunkData { hash, offset, length, .. } = chunker.next().unwrap().unwrap();
+        let ChunkData {
+            hash,
+            offset,
+            length,
+            ..
+        } = chunker.next().unwrap().unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, *e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -162,7 +176,12 @@ fn test_cut_sekien_64k_chunks() {
     let mut remaining: usize = contents.len();
     let expected = [(2504464741100432583, 109466)];
     for (e_hash, e_length) in expected.iter() {
-        let ChunkData { hash, offset, length, .. } = chunker.next().unwrap().unwrap();
+        let ChunkData {
+            hash,
+            offset,
+            length,
+            ..
+        } = chunker.next().unwrap().unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, *e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -182,7 +201,13 @@ struct ExpectedChunk {
 #[test]
 fn test_cut_sekien_16k_nc_0() {
     let contents = fs::read("test/fixtures/SekienAkashita.jpg").unwrap();
-    let mut chunker = StreamCDC::with_level(contents.as_slice(), 4096, 16384, 65535, Normalization::Level0);
+    let mut chunker = StreamCDC::with_level(
+        contents.as_slice(),
+        4096,
+        16384,
+        65535,
+        Normalization::Level0,
+    );
     let mut cursor: usize = 0;
     let mut remaining: usize = contents.len();
     let expected = [
@@ -193,7 +218,12 @@ fn test_cut_sekien_16k_nc_0() {
         (6321136627705800457, 12083),
     ];
     for &(e_hash, e_length) in expected.iter() {
-        let ChunkData { hash, offset, length, .. } = chunker.next().unwrap().unwrap();
+        let ChunkData {
+            hash,
+            offset,
+            length,
+            ..
+        } = chunker.next().unwrap().unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -206,7 +236,13 @@ fn test_cut_sekien_16k_nc_0() {
 #[test]
 fn test_cut_sekien_16k_nc_3() {
     let contents = fs::read("test/fixtures/SekienAkashita.jpg").unwrap();
-    let mut chunker = StreamCDC::with_level(contents.as_slice(), 8192, 16384, 32768, Normalization::Level3);
+    let mut chunker = StreamCDC::with_level(
+        contents.as_slice(),
+        8192,
+        16384,
+        32768,
+        Normalization::Level3,
+    );
     let mut cursor: usize = 0;
     let mut remaining: usize = contents.len();
     let expected = [
@@ -218,7 +254,12 @@ fn test_cut_sekien_16k_nc_3() {
         (2504464741100432583, 17320),
     ];
     for (e_hash, e_length) in expected.iter() {
-        let ChunkData { hash, offset, length, .. } = chunker.read_chunk().unwrap();
+        let ChunkData {
+            hash,
+            offset,
+            length,
+            ..
+        } = chunker.read_chunk().unwrap();
         let pos = offset as usize + length;
         assert_eq!(hash, *e_hash);
         assert_eq!(pos, cursor + e_length);
