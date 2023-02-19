@@ -1,12 +1,9 @@
-use std::ops::Deref;
-
 use crate::config::Config;
-use crate::memory::BUFFER_SIZE;
 use crate::memory::{MemoryHandle, MemoryManager};
 use crate::Hash;
 use async_trait::async_trait;
 use aws_sdk_s3 as s3;
-use bytes::Bytes;
+use bytes::{BufMut, Bytes};
 use eyre::Result;
 
 use s3::model::{CompletedMultipartUpload, CompletedPart};
@@ -103,7 +100,7 @@ impl Store for S3Store {
 
         println!("Uploading {chunk_count} chunks....");
 
-        let bytes = mem.deref();
+        let bytes = mem.as_slice();
         let total_len = mem.len();
 
         for chunk_index in 0..chunk_count {
@@ -173,10 +170,7 @@ impl Store for S3Store {
             .await?;
 
         let mut handle = MemoryManager::new().alloc().await;
-        let len = bytes.len();
-        assert!(BUFFER_SIZE > len);
-        handle.len = len;
-        handle.copy_from_slice(&bytes);
+        handle.cursor_mut().put_slice(&bytes);
         Ok(handle)
     }
 
@@ -197,14 +191,8 @@ pub async fn example_s3store() {
 
     // Write some garbage into the handle
     let text = b"Hello chunk-locker!";
-    let text_len = text.len();
 
-    for _ in 0..(BUFFER_SIZE.checked_div(text_len).unwrap()) {
-        handle.len += text_len;
-        let bytes = &mut *handle;
-        let range = bytes.len() - text_len..bytes.len();
-        bytes[range].copy_from_slice(text);
-    }
+    handle.cursor_mut().put_slice(text);
 
     println!("Uploading to s3");
     let hash = Hash::default();
@@ -213,6 +201,6 @@ pub async fn example_s3store() {
     println!("Downloading from s3");
     // try get it back down
     let handle = store.get(hash).await.unwrap();
-    let bytes = &*handle;
+    let bytes = handle.as_slice();
     println!("{}", String::from_utf8(bytes[..100].to_vec()).unwrap())
 }

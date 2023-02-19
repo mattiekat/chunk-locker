@@ -20,3 +20,7 @@ async fn main() {
 
     // store::s3::example_s3store().await;
 }
+
+/// A mutex to prevent tests which use static variables from conflicting with each other.
+#[cfg(test)]
+static STATIC_TEST_MUTEX: parking_lot::ReentrantMutex<()> = parking_lot::const_reentrant_mutex(());
