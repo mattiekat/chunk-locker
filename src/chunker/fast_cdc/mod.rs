@@ -35,59 +35,6 @@ mod consts;
 #[cfg(test)]
 mod tests;
 
-/// Find the next chunk cut point in the source.
-#[allow(clippy::too_many_arguments)]
-fn cut(
-    source: &[u8],
-    min_size: usize,
-    avg_size: usize,
-    max_size: usize,
-    mask_s: u64,
-    mask_l: u64,
-    mask_s_ls: u64,
-    mask_l_ls: u64,
-) -> (u64, usize) {
-    let mut remaining = source.len();
-    if remaining <= min_size {
-        return (0, remaining);
-    }
-    let mut center = avg_size;
-    if remaining > max_size {
-        remaining = max_size;
-    } else if remaining < center {
-        center = remaining;
-    }
-    let mut index = min_size / 2;
-    let mut hash: u64 = 0;
-    while index < center / 2 {
-        let a = index * 2;
-        hash = (hash << 2).wrapping_add(GEAR_LS[source[a] as usize]);
-        if (hash & mask_s_ls) == 0 {
-            return (hash, a);
-        }
-        hash = hash.wrapping_add(GEAR[source[a + 1] as usize]);
-        if (hash & mask_s) == 0 {
-            return (hash, a + 1);
-        }
-        index += 1;
-    }
-    while index < remaining / 2 {
-        let a = index * 2;
-        hash = (hash << 2).wrapping_add(GEAR_LS[source[a] as usize]);
-        if (hash & mask_l_ls) == 0 {
-            return (hash, a);
-        }
-        hash = hash.wrapping_add(GEAR[source[a + 1] as usize]);
-        if (hash & mask_l) == 0 {
-            return (hash, a + 1);
-        }
-        index += 1;
-    }
-    // If all else fails, return the largest chunk. This will happen with
-    // pathological data, such as all zeroes.
-    (hash, remaining)
-}
-
 /// The level for the normalized chunking used by FastCDC.
 ///
 /// Normalized chunking "generates chunks whose sizes are normalized to a
@@ -238,6 +185,48 @@ impl<S> StreamCdc<S> {
         }
     }
 
+    /// Find the next chunk cut point in the source.
+    #[allow(clippy::too_many_arguments)]
+    fn cut(&self) -> (u64, usize) {
+        let mut remaining = self.length;
+        if remaining <= self.min_size {
+            return (0, remaining);
+        }
+        let mut center = self.avg_size;
+        if remaining > self.max_size {
+            remaining = self.max_size;
+        } else if remaining < center {
+            center = remaining;
+        }
+
+        let mut hash: u64 = 0;
+        for index in (self.min_size / 2)..(center / 2) {
+            let a = index * 2;
+            hash = (hash << 2).wrapping_add(GEAR_LS[self.buffer[a] as usize]);
+            if (hash & self.mask_s_ls) == 0 {
+                return (hash, a);
+            }
+            hash = hash.wrapping_add(GEAR[self.buffer[a + 1] as usize]);
+            if (hash & self.mask_s) == 0 {
+                return (hash, a + 1);
+            }
+        }
+        for index in (center / 2)..(remaining / 2) {
+            let a = index * 2;
+            hash = (hash << 2).wrapping_add(GEAR_LS[self.buffer[a] as usize]);
+            if (hash & self.mask_l_ls) == 0 {
+                return (hash, a);
+            }
+            hash = hash.wrapping_add(GEAR[self.buffer[a + 1] as usize]);
+            if (hash & self.mask_l) == 0 {
+                return (hash, a + 1);
+            }
+        }
+        // If all else fails, return the largest chunk. This will happen with
+        // pathological data, such as all zeroes.
+        (hash, remaining)
+    }
+
     /// Drains a specified number of bytes from the buffer, then resizes the
     /// buffer back to `capacity` size in preparation for further reads.
     fn drain_bytes(&mut self, count: usize) -> Result<Vec<u8>, Error> {
@@ -285,16 +274,7 @@ impl<S: Read> StreamCdc<S> {
         if self.length == 0 {
             Err(Error::Empty)
         } else {
-            let (hash, count) = cut(
-                &self.buffer[..self.length],
-                self.min_size,
-                self.avg_size,
-                self.max_size,
-                self.mask_s,
-                self.mask_l,
-                self.mask_s_ls,
-                self.mask_l_ls,
-            );
+            let (hash, count) = self.cut();
             if count == 0 {
                 Err(Error::Empty)
             } else {
