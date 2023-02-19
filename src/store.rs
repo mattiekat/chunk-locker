@@ -25,7 +25,7 @@ pub trait Store {
     async fn put_db(&self) -> Result<()>;
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Default)]
 #[allow(unused)]
 pub struct StoreConfig {
     s3: Option<S3Config>,

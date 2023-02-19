@@ -1,0 +1,4 @@
+[memory]
+buffer_count = 4
+# 8 MiB
+buffer_size = 8388608
