@@ -309,7 +309,7 @@ unsafe impl<'buf> BufMut for MutMemoryCursor<'buf> {
         );
         self.offset += cnt;
         self.handle
-            .update_len(cmp::max(self.handle.len, self.offset.saturating_sub(1)))
+            .update_len(cmp::max(self.handle.len, self.offset))
     }
 
     fn chunk_mut(&mut self) -> &mut UninitSlice {
@@ -319,6 +319,7 @@ unsafe impl<'buf> BufMut for MutMemoryCursor<'buf> {
 
 #[cfg(test)]
 mod tests {
+    use bytes::{Buf, BufMut};
     use futures::FutureExt;
     use tokio::task::yield_now;
 
@@ -425,6 +426,63 @@ mod tests {
         assert_eq!(s[1], 2);
         assert_eq!(s[2], 4);
         assert_eq!(s[3], 6);
+
+        drop(m);
+        yield_now().await;
+    }
+
+    #[tokio::test]
+    async fn bytes_read() {
+        let _guard = STATIC_TEST_MUTEX.lock();
+        let manager = MemoryManager::new();
+
+        let mut m = manager.alloc().await;
+        unsafe {
+            m.update_len(4);
+            m.as_slice_mut().put_slice(&[1, 2, 4, 6]);
+        }
+
+        assert_eq!(m.cursor().chunk(), &[1, 2, 4, 6]);
+
+        let mut c = m.cursor();
+        assert_eq!(c.remaining(), 4);
+        c.advance(2);
+        let mut b = [0u8; 2];
+        c.copy_to_slice(&mut b);
+        assert_eq!(b, [4, 6]);
+        assert_eq!(c.remaining(), 0);
+
+        let mut c = m.cursor_from(1);
+        assert_eq!(c.remaining(), 3);
+        let mut b = [0u8; 3];
+        c.copy_to_slice(&mut b);
+        assert_eq!(b, [2, 4, 6]);
+        assert_eq!(c.remaining(), 0);
+
+        drop(m);
+        yield_now().await;
+    }
+
+    #[tokio::test]
+    async fn bytes_write() {
+        let _guard = STATIC_TEST_MUTEX.lock();
+        let manager = MemoryManager::new();
+
+        let mut m = manager.alloc().await;
+        assert_eq!(m.len(), 0);
+        m.cursor_mut().put_slice(&[6, 8, 12, 72, 53]);
+        assert_eq!(m.len(), 5);
+        assert_eq!(m.as_slice(), &[6, 8, 12, 72, 53]);
+
+        let mut c = m.cursor_mut_from(1);
+        c.put_slice(&[2, 3, 5]);
+        assert_eq!(m.len(), 5);
+        assert_eq!(m.as_slice(), &[6, 2, 3, 5, 53]);
+
+        let mut c = m.cursor_mut_from(5);
+        c.put_slice(&[1, 2, 3]);
+        assert_eq!(m.len(), 8);
+        assert_eq!(m.as_slice(), &[6, 2, 3, 5, 53, 1, 2, 3]);
 
         drop(m);
         yield_now().await;
