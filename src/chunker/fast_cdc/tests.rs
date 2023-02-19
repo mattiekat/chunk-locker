@@ -1,6 +1,8 @@
-use super::*;
-use md5::{Digest, Md5};
 use std::fs::{self, File};
+
+use md5::{Digest, Md5};
+
+use super::*;
 
 #[test]
 fn test_logarithm2() {

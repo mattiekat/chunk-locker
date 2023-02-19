@@ -35,6 +35,7 @@ mod consts;
 #[cfg(test)]
 mod tests;
 
+
 /// Find the next chunk cut point in the source.
 #[allow(clippy::too_many_arguments)]
 fn cut(
@@ -117,12 +118,6 @@ pub enum Normalization {
 impl Default for Normalization {
     fn default() -> Self {
         Self::Level1
-    }
-}
-
-impl Normalization {
-    fn bits(self) -> u32 {
-        self as u32
     }
 }
 
@@ -224,7 +219,7 @@ impl<S: Read> StreamCDC<S> {
         );
 
         let bits = logarithm2(avg_size);
-        let normalization = level.bits();
+        let normalization = level as u32;
         let mask_s = MASKS[(bits + normalization) as usize];
         let mask_l = MASKS[(bits - normalization) as usize];
         Self {
