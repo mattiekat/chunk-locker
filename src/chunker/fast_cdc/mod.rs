@@ -32,6 +32,7 @@ use std::pin::Pin;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio_stream::Stream;
 
+use crate::memory::{MemoryHandle, MemoryManager};
 pub use consts::*;
 
 mod consts;
@@ -114,7 +115,7 @@ pub struct ChunkData {
 /// ```
 pub struct StreamCdc<S> {
     /// Buffer of data from source for finding cut points.
-    buffer: Vec<u8>,
+    buffer: MemoryHandle,
     /// Maximum capacity of the buffer (always `max_size`).
     capacity: usize,
     /// Number of relevant bytes in the `buffer`.
@@ -138,12 +139,12 @@ impl<S> StreamCdc<S> {
     /// Construct a `StreamCdc` that will process bytes from the given source.
     ///
     /// Uses chunk size normalization level 1 by default.
-    pub fn new(source: S, min_size: u32, avg_size: u32, max_size: u32) -> Self {
+    pub async fn new(source: S, min_size: u32, avg_size: u32, max_size: u32) -> Self {
         StreamCdc::with_level(source, min_size, avg_size, max_size, Normalization::Level1)
     }
 
     /// Create a new `StreamCdc` with the given normalization level.
-    pub fn with_level(
+    pub async fn with_level(
         source: S,
         min_size: u32,
         avg_size: u32,
@@ -165,12 +166,18 @@ impl<S> StreamCdc<S> {
             "Maximum size must be greater than the average size"
         );
 
+        let buffer = MemoryManager::new().alloc().await;
+        assert!(
+            max_size as usize <= buffer.max_len(),
+            "Maximum chunk size cannot exceed maximum buffer size"
+        );
+
         let bits = logarithm2(avg_size);
         let normalization = level as u32;
         let mask_s = MASKS[(bits + normalization) as usize];
         let mask_l = MASKS[(bits - normalization) as usize];
         Self {
-            buffer: vec![0_u8; max_size as usize],
+            buffer,
             capacity: max_size as usize,
             length: 0,
             source,
