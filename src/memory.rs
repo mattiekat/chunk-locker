@@ -6,6 +6,7 @@ use std::alloc::{alloc, alloc_zeroed, dealloc, Layout};
 use std::mem::{size_of, swap};
 use std::ptr::null_mut;
 use std::{cmp, slice};
+use std::ops::{Index, IndexMut};
 
 use bitvec::prelude::BitSlice;
 use bytes::buf::UninitSlice;
@@ -233,6 +234,22 @@ impl MemoryHandle {
     }
 }
 
+impl Index<usize> for MemoryHandle {
+    type Output = u8;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        assert!(index < self.len);
+        unsafe { &*(self.mem.add(index) as *const _) }
+    }
+}
+
+impl IndexMut<usize> for MemoryHandle {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        assert!(index < self.len);
+        unsafe { &mut *(self.mem.add(index)) }
+    }
+}
+
 impl Drop for MemoryHandle {
     fn drop(&mut self) {
         // make sure we free up this buffer
@@ -410,6 +427,28 @@ mod tests {
 
     #[tokio::test]
     async fn write_basic() {
+        let _guard = STATIC_TEST_MUTEX.lock();
+        let manager = MemoryManager::new();
+
+        let mut m = manager.alloc().await;
+        unsafe { m.update_len(4) };
+        assert_eq!(m.len(), 4);
+        m[0] = 1;
+        m[1] = 2;
+        m[2] = 4;
+        m[3] = 6;
+
+        assert_eq!(m[0], 1);
+        assert_eq!(m[1], 2);
+        assert_eq!(m[2], 4);
+        assert_eq!(m[3], 6);
+
+        drop(m);
+        yield_now().await;
+    }
+
+    #[tokio::test]
+    async fn write_slice() {
         let _guard = STATIC_TEST_MUTEX.lock();
         let manager = MemoryManager::new();
 
