@@ -194,6 +194,13 @@ impl MemoryHandle {
         self.len = len;
     }
 
+    /// Shrink this memory handle to a new length. Will panic if `len` is greater than the current
+    /// length of the buffer.
+    pub fn truncate(&mut self, len: usize) {
+        assert!(len <= self.len);
+        unsafe { self.update_len_unchecked(len) }
+    }
+
     pub const fn as_slice(&self) -> &[u8] {
         // we can safely do this because we know that we are the only handle referencing this buffer
         unsafe { slice::from_raw_parts(self.mem, self.len) }

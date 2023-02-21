@@ -28,6 +28,9 @@
 //! read data from a boxed `Read` into an internal buffer of `max_size` and
 //! produce `ChunkData` values from the `Iterator`.
 use async_stream::stream;
+use bytes::BufMut;
+use std::fmt::{Debug, Formatter};
+use std::mem;
 use std::pin::Pin;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio_stream::Stream;
@@ -83,16 +86,25 @@ pub enum Error {
 }
 
 /// Represents a chunk returned from the StreamCdc iterator.
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct ChunkData {
     /// The gear hash value as of the end of the chunk.
     pub hash: u64,
     /// Starting byte position within the source.
     pub offset: u64,
-    /// Length of the chunk in bytes.
-    pub length: usize,
     /// Source bytes contained in this chunk.
-    pub data: Vec<u8>,
+    pub data: MemoryHandle,
+}
+
+impl Debug for ChunkData {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "ChunkData {{ hash: {}, offset: {}, length: {} }}",
+            self.hash,
+            self.offset,
+            self.data.len()
+        )
+    }
 }
 
 /// The FastCDC chunker implementation from 2020 with streaming support.
@@ -116,10 +128,6 @@ pub struct ChunkData {
 pub struct StreamCdc<S> {
     /// Buffer of data from source for finding cut points.
     buffer: MemoryHandle,
-    /// Maximum capacity of the buffer (always `max_size`).
-    capacity: usize,
-    /// Number of relevant bytes in the `buffer`.
-    length: usize,
     /// Source from which data is read into `buffer`.
     source: S,
     /// Number of bytes read from the source so far.
@@ -140,7 +148,7 @@ impl<S> StreamCdc<S> {
     ///
     /// Uses chunk size normalization level 1 by default.
     pub async fn new(source: S, min_size: u32, avg_size: u32, max_size: u32) -> Self {
-        StreamCdc::with_level(source, min_size, avg_size, max_size, Normalization::Level1)
+        StreamCdc::with_level(source, min_size, avg_size, max_size, Normalization::Level1).await
     }
 
     /// Create a new `StreamCdc` with the given normalization level.
@@ -178,8 +186,6 @@ impl<S> StreamCdc<S> {
         let mask_l = MASKS[(bits - normalization) as usize];
         Self {
             buffer,
-            capacity: max_size as usize,
-            length: 0,
             source,
             eof: false,
             processed: 0,
@@ -196,7 +202,7 @@ impl<S> StreamCdc<S> {
     /// Find the next chunk cut point in the source.
     #[allow(clippy::too_many_arguments)]
     fn cut(&self) -> (u64, usize) {
-        let mut remaining = self.length;
+        let mut remaining = self.buffer.len();
         if remaining <= self.min_size {
             return (0, remaining);
         }
@@ -235,21 +241,23 @@ impl<S> StreamCdc<S> {
         (hash, remaining)
     }
 
-    /// Drains a specified number of bytes from the buffer, then resizes the
-    /// buffer back to `capacity` size in preparation for further reads.
-    fn drain_bytes(&mut self, count: usize) -> Result<Vec<u8>, Error> {
-        // this code originally copied from asuran crate
-        if count > self.length {
-            Err(Error::Other(format!(
-                "drain_bytes() called with count larger than length: {} > {}",
-                count, self.length
-            )))
-        } else {
-            let data = self.buffer.drain(..count).collect::<Vec<u8>>();
-            self.length -= count;
-            self.buffer.resize(self.capacity, 0_u8);
-            Ok(data)
-        }
+    /// Returns the first `count` bytes and keeps the remaining in the internal buffer.
+    ///
+    /// Allocates a new internal buffer and returns the old one. It also copies over any data which
+    /// was after the end of the chunk to the new buffer and clears it from the one which is
+    /// returned. The returned buffer will contain only the chunk itself.
+    async fn drain_bytes(&mut self, count: usize) -> MemoryHandle {
+        assert!(count <= self.buffer.len());
+
+        // allocate a new empty buffer
+        let mut buffer = MemoryManager::new().alloc().await;
+        // get the empty buffer into self
+        mem::swap(&mut self.buffer, &mut buffer);
+        // move over remainder of the old buffer after the chunk into the new buffer
+        self.buffer.cursor_mut().put(buffer.cursor_from(count));
+        // shrink the old buffer we are returning to just the size of its chunk
+        buffer.truncate(count);
+        buffer
     }
 }
 
@@ -273,46 +281,40 @@ impl<S: AsyncRead + Unpin> StreamCdc<S> {
     /// Fill the buffer with data from the source, returning the number of bytes
     /// read (zero if end of source has been reached).
     async fn fill_buffer(&mut self) -> Result<usize, Error> {
-        // this code originally copied from asuran crate
-        if self.eof {
-            Ok(0)
-        } else {
-            let mut all_bytes_read = 0;
-            while !self.eof && self.length < self.capacity {
-                let bytes_read = self.source.read(&mut self.buffer[self.length..]).await?;
-                if bytes_read == 0 {
-                    self.eof = true;
-                } else {
-                    self.length += bytes_read;
-                    all_bytes_read += bytes_read;
-                }
-            }
-            Ok(all_bytes_read)
+        let max_len = self.buffer.max_len();
+        let mut all_bytes_read = 0;
+        let mut cursor = self.buffer.cursor_mut();
+        while !self.eof && all_bytes_read < max_len {
+            let bytes_read = self.source.read_buf(&mut cursor).await?;
+            self.eof |= bytes_read == 0;
+            all_bytes_read += bytes_read;
         }
+        debug_assert_eq!(self.buffer.len(), all_bytes_read);
+        Ok(all_bytes_read)
     }
 
     /// Find the next chunk in the source. If the end of the source has been
-    /// reached, returns `Error::Empty` as the error.
+    /// reached, returns `Ok(None)`.
     async fn read_chunk(&mut self) -> Result<Option<ChunkData>, Error> {
         self.fill_buffer().await?;
-        if self.length == 0 {
-            Ok(None)
-        } else {
-            let (hash, count) = self.cut();
-            if count == 0 {
-                Ok(None)
-            } else {
-                let offset = self.processed;
-                self.processed += count as u64;
-                let data = self.drain_bytes(count)?;
-                Ok(Some(ChunkData {
-                    hash,
-                    offset,
-                    length: count,
-                    data,
-                }))
-            }
+        debug_assert!(
+            self.eof || self.buffer.len() > 0,
+            "We are not at end of file so we should have read bytes"
+        );
+        if self.eof {
+            return Ok(None);
         }
+
+        let (hash, count) = self.cut();
+        if count == 0 {
+            // TODO: we might want to still return a chunk that is too small in this case.
+            return Ok(None);
+        }
+
+        let offset = self.processed;
+        self.processed += count as u64;
+        let data = self.drain_bytes(count).await;
+        Ok(Some(ChunkData { hash, offset, data }))
     }
 }
 
