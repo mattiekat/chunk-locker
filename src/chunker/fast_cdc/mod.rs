@@ -75,14 +75,23 @@ impl Default for Normalization {
     }
 }
 
+impl Normalization {
+    /// Returns `(mask_s, mask_l)`
+    fn masks(self, avg_size: u32) -> (u64, u64) {
+        let bits = logarithm2(avg_size);
+        let normalization = self as u32;
+        let mask_s = MASKS[(bits + normalization) as usize];
+        let mask_l = MASKS[(bits - normalization) as usize];
+        (mask_s, mask_l)
+    }
+}
+
 /// The error type returned from the `StreamCdc` iterator.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// An I/O error occurred.
     #[error("IO Error: {0:?}")]
     IoError(#[from] std::io::Error),
-    #[error("Chunker Error: {0}")]
-    Other(String),
 }
 
 /// Represents a chunk returned from the StreamCdc iterator.
@@ -180,10 +189,7 @@ impl<S> StreamCdc<S> {
             "Maximum chunk size cannot exceed maximum buffer size"
         );
 
-        let bits = logarithm2(avg_size);
-        let normalization = level as u32;
-        let mask_s = MASKS[(bits + normalization) as usize];
-        let mask_l = MASKS[(bits - normalization) as usize];
+        let (mask_s, mask_l) = level.masks(avg_size);
         Self {
             buffer,
             source,
@@ -281,27 +287,34 @@ impl<S: AsyncRead + Unpin> StreamCdc<S> {
     /// Fill the buffer with data from the source, returning the number of bytes
     /// read (zero if end of source has been reached).
     async fn fill_buffer(&mut self) -> Result<usize, Error> {
-        let max_len = self.buffer.max_len();
+        let initial_size = self.buffer.len();
+        let initial_capacity = self.buffer.max_len() - initial_size;
         let mut all_bytes_read = 0;
-        let mut cursor = self.buffer.cursor_mut();
-        while !self.eof && all_bytes_read < max_len {
+        let mut cursor = self.buffer.cursor_mut_from(self.buffer.len());
+        while !self.eof && all_bytes_read < initial_capacity {
             let bytes_read = self.source.read_buf(&mut cursor).await?;
             self.eof |= bytes_read == 0;
             all_bytes_read += bytes_read;
         }
-        debug_assert_eq!(self.buffer.len(), all_bytes_read);
+        debug_assert_eq!(self.buffer.len() - initial_size, all_bytes_read);
         Ok(all_bytes_read)
     }
 
     /// Find the next chunk in the source. If the end of the source has been
     /// reached, returns `Ok(None)`.
     async fn read_chunk(&mut self) -> Result<Option<ChunkData>, Error> {
-        self.fill_buffer().await?;
+        if self.buffer.len() < self.max_size {
+            // we might need more bytes for this chunk
+            self.fill_buffer().await?;
+        } else {
+            // already have enough, save on the read ops
+        }
+
         debug_assert!(
             self.eof || self.buffer.len() > 0,
             "We are not at end of file so we should have read bytes"
         );
-        if self.eof {
+        if self.buffer.len() == 0 {
             return Ok(None);
         }
 

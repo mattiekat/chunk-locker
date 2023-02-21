@@ -221,7 +221,7 @@ impl MemoryHandle {
     }
 
     pub const fn cursor_from(&self, offset: usize) -> MemoryCursor {
-        assert!(offset < self.len);
+        assert!(offset <= self.len);
         MemoryCursor {
             handle: self,
             offset,
@@ -413,6 +413,43 @@ mod tests {
         assert_eq!(manager.allocations().await, 0);
 
         assert!(manager.alloc().now_or_never().is_some());
+        yield_now().await;
+        assert_eq!(manager.allocations().await, 0);
+    }
+
+    #[tokio::test]
+    async fn non_deadlocking_dealloc() {
+        let _guard = STATIC_TEST_MUTEX.lock();
+        let manager = MemoryManager::new();
+
+        {
+            let mut h1 = manager.alloc().await;
+            h1.cursor_mut().put_i64(1);
+            let mut h2 = manager.alloc().await;
+            h2.cursor_mut().put_i64(2);
+            let mut h3 = manager.alloc().await;
+            h3.cursor_mut().put_i64(3);
+            let mut h4 = manager.alloc().await;
+            h4.cursor_mut().put_i64(4);
+
+            // make sure this works even without a yield
+            drop(h1);
+            let mut h5 = manager.alloc().await;
+            h5.cursor_mut().put_i64(5);
+        }
+
+        // if alloc and dealloc deadlock, that would be bad
+        for i in 0..10 {
+            let mut h1 = manager.alloc().await;
+            h1.cursor_mut().put_i64(i);
+            let mut h2 = manager.alloc().await;
+            h2.cursor_mut().put_i64(i + 1);
+            let mut h3 = manager.alloc().await;
+            h3.cursor_mut().put_i64(i + 2);
+            let mut h4 = manager.alloc().await;
+            h4.cursor_mut().put_i64(i + 3);
+        }
+
         yield_now().await;
         assert_eq!(manager.allocations().await, 0);
     }
