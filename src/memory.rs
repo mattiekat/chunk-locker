@@ -4,9 +4,9 @@
 
 use std::alloc::{alloc, alloc_zeroed, dealloc, Layout};
 use std::mem::{size_of, swap};
+use std::ops::{Index, IndexMut};
 use std::ptr::null_mut;
 use std::{cmp, slice};
-use std::ops::{Index, IndexMut};
 
 use bitvec::prelude::BitSlice;
 use bytes::buf::UninitSlice;

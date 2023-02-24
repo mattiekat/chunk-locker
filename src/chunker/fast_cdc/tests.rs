@@ -3,7 +3,9 @@ use tokio::fs;
 use tokio::fs::File;
 use tokio::task::yield_now;
 use tokio_stream::StreamExt;
-use crate::chunker::fast_cdc::Normalization::Level1;
+
+use crate::chunker::fast_cdc::chunking::Normalization::Level1;
+use crate::chunker::fast_cdc::chunking::{ChunkData, StreamCdc};
 use crate::STATIC_TEST_MUTEX;
 
 use super::*;
@@ -44,46 +46,40 @@ fn test_logarithm2() {
     assert_eq!(logarithm2(16_777_217), 24);
 }
 
-#[tokio::test]
+#[test]
 #[should_panic]
-async fn test_minimum_too_low() {
-    let array = [0u8; 1024];
-    StreamCdc::new(array.as_slice(), 63, 256, 1024).await;
+fn test_minimum_too_low() {
+    StreamCdcFactory::new(63, 256, 1024);
 }
 
-#[tokio::test]
+#[test]
 #[should_panic]
-async fn test_minimum_too_high() {
-    let array = [0u8; 1024];
-    StreamCdc::new(array.as_slice(), 67_108_867, 256, 1024).await;
+fn test_minimum_too_high() {
+    StreamCdcFactory::new(67_108_867, 256, 1024);
 }
 
-#[tokio::test]
+#[test]
 #[should_panic]
-async fn test_average_too_low() {
-    let array = [0u8; 1024];
-    StreamCdc::new(array.as_slice(), 64, 255, 1024).await;
+fn test_average_too_low() {
+    StreamCdcFactory::new(64, 255, 1024);
 }
 
-#[tokio::test]
+#[test]
 #[should_panic]
-async fn test_average_too_high() {
-    let array = [0u8; 1024];
-    StreamCdc::new(array.as_slice(), 64, 268_435_457, 1024).await;
+fn test_average_too_high() {
+    StreamCdcFactory::new(64, 268_435_457, 1024);
 }
 
-#[tokio::test]
+#[test]
 #[should_panic]
-async fn test_maximum_too_low() {
-    let array = [0u8; 1024];
-    StreamCdc::new(array.as_slice(), 64, 256, 1023).await;
+fn test_maximum_too_low() {
+    StreamCdcFactory::new(64, 256, 1023);
 }
 
-#[tokio::test]
+#[test]
 #[should_panic]
-async fn test_maximum_too_high() {
-    let array = [0u8; 1024];
-    StreamCdc::new(array.as_slice(), 64, 256, 1_073_741_825).await;
+fn test_maximum_too_high() {
+    StreamCdcFactory::new(64, 256, 1_073_741_825);
 }
 
 #[test]
@@ -105,14 +101,12 @@ async fn test_cut_all_zeros() {
 
     // for all zeros, always returns chunks of maximum size
     let array = [0u8; 10240];
-    let mut chunker = StreamCdc::new(array.as_slice(), 64, 256, 1024).await;
+    let mut chunker = StreamCdcFactory::new(64, 256, 1024)
+        .make(array.as_slice())
+        .await;
     let mut cursor: usize = 0;
     for _ in 0..10 {
-        let ChunkData {
-            hash,
-            offset,
-            data,
-        } = chunker.read_chunk().await.unwrap().unwrap();
+        let ChunkData { hash, offset, data } = chunker.read_chunk().await.unwrap().unwrap();
         let pos = offset as usize + data.len();
         assert_eq!(hash, 14169102344523991076);
         assert_eq!(pos, cursor + 1024);
@@ -130,7 +124,9 @@ async fn test_cut_sekien_16k_chunks() {
     let _guard = STATIC_TEST_MUTEX.lock();
 
     let contents = fs::read("test/fixtures/SekienAkashita.jpg").await.unwrap();
-    let mut chunker = StreamCdc::new(contents.as_slice(), 4096, 16384, 65535).await;
+    let mut chunker = StreamCdcFactory::new(4096, 16384, 65535)
+        .make(contents.as_slice())
+        .await;
     let mut cursor: usize = 0;
     let mut remaining: usize = contents.len();
     let expected = [
@@ -141,11 +137,7 @@ async fn test_cut_sekien_16k_chunks() {
         (2504464741100432583, 24700),
     ];
     for (e_hash, e_length) in expected.iter() {
-        let ChunkData {
-            hash,
-            offset,
-            data,
-        } = chunker.read_chunk().await.unwrap().unwrap();
+        let ChunkData { hash, offset, data } = chunker.read_chunk().await.unwrap().unwrap();
         let pos = offset as usize + data.len();
         assert_eq!(hash, *e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -163,16 +155,14 @@ async fn test_cut_sekien_32k_chunks() {
     let _guard = STATIC_TEST_MUTEX.lock();
 
     let contents = fs::read("test/fixtures/SekienAkashita.jpg").await.unwrap();
-    let mut chunker = StreamCdc::new(contents.as_slice(), 8192, 32768, 131072).await;
+    let mut chunker = StreamCdcFactory::new(8192, 32768, 131072)
+        .make(contents.as_slice())
+        .await;
     let mut cursor: usize = 0;
     let mut remaining: usize = contents.len();
     let expected = [(15733367461443853673, 66549), (6321136627705800457, 42917)];
     for (e_hash, e_length) in expected.iter() {
-        let ChunkData {
-            hash,
-            offset,
-            data,
-        } = chunker.read_chunk().await.unwrap().unwrap();
+        let ChunkData { hash, offset, data } = chunker.read_chunk().await.unwrap().unwrap();
         let pos = offset as usize + data.len();
         assert_eq!(hash, *e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -190,16 +180,14 @@ async fn test_cut_sekien_64k_chunks() {
     let _guard = STATIC_TEST_MUTEX.lock();
 
     let contents = fs::read("test/fixtures/SekienAkashita.jpg").await.unwrap();
-    let mut chunker = StreamCdc::new(contents.as_slice(), 16384, 65536, 262144).await;
+    let mut chunker = StreamCdcFactory::new(16384, 65536, 262144)
+        .make(contents.as_slice())
+        .await;
     let mut cursor: usize = 0;
     let mut remaining: usize = contents.len();
     let expected = [(2504464741100432583, 109466)];
     for (e_hash, e_length) in expected.iter() {
-        let ChunkData {
-            hash,
-            offset,
-            data,
-        } = chunker.read_chunk().await.unwrap().unwrap();
+        let ChunkData { hash, offset, data } = chunker.read_chunk().await.unwrap().unwrap();
         let pos = offset as usize + data.len();
         assert_eq!(hash, *e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -224,13 +212,9 @@ async fn test_cut_sekien_16k_nc_0() {
     let _guard = STATIC_TEST_MUTEX.lock();
 
     let contents = fs::read("test/fixtures/SekienAkashita.jpg").await.unwrap();
-    let mut chunker = StreamCdc::with_level(
-        contents.as_slice(),
-        4096,
-        16384,
-        65535,
-        Normalization::Level0,
-    ).await;
+    let mut chunker = StreamCdcFactory::with_level(4096, 16384, 65535, Normalization::Level0)
+        .make(contents.as_slice())
+        .await;
     let mut cursor: usize = 0;
     let mut remaining: usize = contents.len();
     let expected = [
@@ -241,11 +225,7 @@ async fn test_cut_sekien_16k_nc_0() {
         (6321136627705800457, 12083),
     ];
     for &(e_hash, e_length) in expected.iter() {
-        let ChunkData {
-            hash,
-            offset,
-            data,
-        } = chunker.read_chunk().await.unwrap().unwrap();
+        let ChunkData { hash, offset, data } = chunker.read_chunk().await.unwrap().unwrap();
         let pos = offset as usize + data.len();
         assert_eq!(hash, e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -263,13 +243,9 @@ async fn test_cut_sekien_16k_nc_3() {
     let _guard = STATIC_TEST_MUTEX.lock();
 
     let contents = fs::read("test/fixtures/SekienAkashita.jpg").await.unwrap();
-    let mut chunker = StreamCdc::with_level(
-        contents.as_slice(),
-        8192,
-        16384,
-        32768,
-        Normalization::Level3,
-    ).await;
+    let mut chunker = StreamCdcFactory::with_level(8192, 16384, 32768, Normalization::Level3)
+        .make(contents.as_slice())
+        .await;
     let mut cursor: usize = 0;
     let mut remaining: usize = contents.len();
     let expected = [
@@ -281,11 +257,7 @@ async fn test_cut_sekien_16k_nc_3() {
         (2504464741100432583, 17320),
     ];
     for (e_hash, e_length) in expected.iter() {
-        let ChunkData {
-            hash,
-            offset,
-            data,
-        } = chunker.read_chunk().await.unwrap().unwrap();
+        let ChunkData { hash, offset, data } = chunker.read_chunk().await.unwrap().unwrap();
         let pos = offset as usize + data.len();
         assert_eq!(hash, *e_hash);
         assert_eq!(pos, cursor + e_length);
@@ -337,7 +309,10 @@ async fn test_stream_sekien_16k_chunks() {
             digest: "1aa7ad95f274d6ba34a983946ebc5af3".into(),
         },
     ];
-    let mut chunker = StreamCdc::new(Box::new(file), 4096, 16384, 65535).await.into_stream();
+    let mut chunker = StreamCdcFactory::new(4096, 16384, 65535)
+        .make(Box::new(file))
+        .await
+        .into_stream();
     let mut index = 0;
     while let Some(result) = chunker.next().await {
         let chunk = result.unwrap();
@@ -396,7 +371,9 @@ async fn test_borrowed_stream_sekien_16k_chunks() {
             digest: "1aa7ad95f274d6ba34a983946ebc5af3".into(),
         },
     ];
-    let mut fastcdc = StreamCdc::new(Box::new(file), 4096, 16384, 65535).await;
+    let mut fastcdc = StreamCdcFactory::new(4096, 16384, 65535)
+        .make(Box::new(file))
+        .await;
     let mut chunker = fastcdc.stream();
     let mut index = 0;
     while let Some(result) = chunker.next().await {

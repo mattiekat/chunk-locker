@@ -1,3 +1,6 @@
+// TODO: remove this once we start hooking things up
+#![allow(unused)]
+
 extern crate core;
 
 mod chunker;
