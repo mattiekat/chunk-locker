@@ -1,9 +1,71 @@
+//! Database format:
+//!
+//! # SQL Approach
+//!
+//! ## Archive
+//! Represents backups of a specific machine path.
+//! - machine name
+//! - total archive size
+//! - root directory for backup
+//! - fs type (e.g. ext4, xfs, ntfs, hfs...)
+//! - remote
+//!
+//! ## Snapshot
+//! A single point in time for an archive
+//! - snapshot id
+//! - hashing algorithm used
+//! - encryption algorithm used
+//! - software version used
+//! - time started
+//! - time finished
+//!
+//! ## Directory
+//! Includes files and other directories that are contained in it.
+//! - directory id
+//! - snapshot id
+//! - partial path (just one segment)
+//! - parent directory id
+//! - permissions
+//! - owner
+//! - group
+//!
+//! ## File
+//! A single file and the chunks that compose it
+//! - file id
+//! - snapshot id
+//! - parent directory id
+//! - filename
+//! - checksum
+//! - permissions
+//! - owner
+//! - group
+//! - creation time
+//! - modification time
+//! - file size
+//! - compression algorithm used (e,g, raw files might not get compressed)
+//!
+//! ## File Relations
+//! - File id
+//! - Chunk id
+//! - Snapshot id
+//! - Ordering
+//!
+//! ## Chunk
+//! - Chunk id
+//! - hash
+//! - (how to find it if not just storing them by hashes in the blobstore)
+
 #![allow(unused)]
 
+use std::collections::VecDeque;
 use crate::Hash;
 use async_trait::async_trait;
 use std::path::Path;
-use std::time::SystemTime;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
+use tokio::sync::{Mutex, oneshot};
+
+mod async_db;
 
 #[async_trait]
 trait DbLoader {
@@ -11,10 +73,6 @@ trait DbLoader {
 
     async fn load() -> eyre::Result<Self::Output>;
 }
-
-/// Async-ifying wrapper to handle sync backend databases.
-/// DB calls all run in a single thread with channels to funnel data to and from asynchronously.
-struct ArchiveDb;
 
 /// ## DB reqs:
 /// - Know if file on disk is different (so get hash/size/mod time of last snapshoted version)
@@ -32,10 +90,14 @@ struct ArchiveDb;
 /// - Pruning will never remove the latest snapshot
 /// - hashes will not collide
 trait Db {
+    fn init(&mut self) -> eyre::Result<()>;
+
     fn file(&self, path: Path, snapshot: Snapshot) -> eyre::Result<Option<FileInfo>>;
+
     fn record_new_file(&mut self, file: FileInfo) -> eyre::Result<()>;
     fn record_file_removed(&mut self, file: Path) -> eyre::Result<()>;
     fn record_file_modified(&mut self, file: Path, chunks: Vec<Hash>) -> eyre::Result<()>;
+
     fn prune_snapshot(&mut self, snapshot: Snapshot) -> eyre::Result<()>;
     fn snapshot(&self, snapshot: Snapshot) -> eyre::Result<SnapshotInfo>;
     fn snapshots(&self) -> eyre::Result<Vec<SnapshotInfo>>;
