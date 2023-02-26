@@ -28,6 +28,8 @@
 //! - permissions
 //! - owner
 //! - group
+//! - creation time
+//! - modification time
 //!
 //! ## File
 //! A single file and the chunks that compose it
@@ -54,6 +56,63 @@
 //! - Chunk id
 //! - hash
 //! - (how to find it if not just storing them by hashes in the blobstore)
+//!
+//!
+//! # Event Format
+//! Each entity should be stored as a chain of events, with each snapshot making possible updates to
+//! it.
+//!
+//! Main problem with this approach is ensuring there is no corruption on the remote. It would be
+//! really easy for an update to go missing and we just assume it never happened. It also makes it
+//! take a really long time to figure out the details for a specific file since you have to merge
+//! a bunch of events which is bad for a FUSE implementation. It also takes a lot of time to prune
+//! information from.
+//!
+//! ## Archive (`archive`)
+//! ### Create
+//! - root directory to backup
+//! - machine name
+//! - host FS type
+//! - remote
+//! - timestamp
+//! - exclusion patterns
+//! - inclusion patterns
+//!
+//! ## Snapshot (`snapshot-<snapid>`)
+//! ### Snapshot Started
+//! - previous snapshot id
+//! - timestamp
+//! - hashing algorithm used
+//! - encryption algorithm used
+//! - software version used
+//!
+//! ### Snapshot Completed
+//! - timestamp
+//!
+//! ### Add Directory
+//! - parent directory id
+//! - directory id
+//! - partial path (just one segment)
+//!
+//! ## Directory (`directory-<id>/<snapid>`)
+//! ### Add Directory
+//! - parent directory id
+//! - directory id
+//! - partial path (just one segment)
+//! - created time
+//!
+//! ### Update Permissions
+//! - permissions
+//!
+//! # Update Owner
+//! - owner
+//! - group
+//!
+//! # Update Modtime
+//! - timestamp
+//!
+//! ## File (`file-<id>-<snapid>`)
+//!
 
 #![allow(unused)]
 
@@ -92,11 +151,11 @@ trait DbLoader {
 trait Db {
     fn init(&mut self) -> eyre::Result<()>;
 
-    fn file(&self, path: Path, snapshot: Snapshot) -> eyre::Result<Option<FileInfo>>;
+    fn file(&self, path: &Path, snapshot: Snapshot) -> eyre::Result<Option<FileInfo>>;
 
     fn record_new_file(&mut self, file: FileInfo) -> eyre::Result<()>;
-    fn record_file_removed(&mut self, file: Path) -> eyre::Result<()>;
-    fn record_file_modified(&mut self, file: Path, chunks: Vec<Hash>) -> eyre::Result<()>;
+    fn record_file_removed(&mut self, file: &Path) -> eyre::Result<()>;
+    fn record_file_modified(&mut self, file: &Path, chunks: Vec<Hash>) -> eyre::Result<()>;
 
     fn prune_snapshot(&mut self, snapshot: Snapshot) -> eyre::Result<()>;
     fn snapshot(&self, snapshot: Snapshot) -> eyre::Result<SnapshotInfo>;
