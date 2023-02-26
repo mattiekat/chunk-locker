@@ -1,55 +1,66 @@
-use std::sync::Arc;
-use tokio::sync::{Mutex, oneshot};
-use std::collections::VecDeque;
-use std::time::Duration;
-use crate::db::Db;
+use std::mem;
+use std::path::PathBuf;
+use std::sync::mpsc as stdmpsc;
+
+use tokio::sync::oneshot;
+
+use crate::db::{Db, FileInfo, Snapshot};
 
 enum DbOp {
-
-}
-
-enum DbOpResponse {
-
+    GetFile {
+        path: PathBuf,
+        snapshot: Snapshot,
+        cb: oneshot::Sender<eyre::Result<Option<FileInfo>>>,
+    },
 }
 
 /// Async-ifying wrapper to handle sync backend databases.
 /// DB calls all run in a single thread with channels to funnel data to and from asynchronously.
 struct AsyncDb {
-    thread: std::thread::JoinHandle<()>,
-    request_queue: Arc<Mutex<VecDeque<(DbOp, oneshot::Sender<DbOpResponse>)>>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+    sender: Option<stdmpsc::Sender<DbOp>>,
 }
 
 impl AsyncDb {
-    pub fn start<D: Db + Send>(db: D) -> Self {
-        let request_queue = Default::default();
-        let thread = std::thread::spawn(AsyncDb::run(db, request_queue.clone()));
+    pub fn start<D: Db + Send + 'static>(db: D) -> Self {
+        let (tx, rx) = stdmpsc::channel();
+        let task = AsyncDbTask {
+            db,
+            request_queue: rx,
+        };
         Self {
-            thread,
-            request_queue,
+            thread: Some(std::thread::spawn(move || task.run())),
+            sender: Some(tx),
         }
     }
-
-    fn run<D: Db>(mut db: D, request_queue: Arc<Mutex<VecDeque<(DbOp, oneshot::Sender<DbOpResponse>)>>>) {
-        loop {
-            db.init().expect("Failed to initialize db");
-
-            let next = request_queue.blocking_lock().pop_front();
-            let Some((op, cb)) = next else {
-                std::thread::sleep(Duration::from_millis(100));
-                continue;
-            };
-
-            match op {
-
-            }
-        }
-    }
-
-
 }
 
 impl Drop for AsyncDb {
     fn drop(&mut self) {
-        todo!()
+        if let Some(sender) = self.sender.take() {
+            mem::drop(sender)
+        }
+        if let Some(thread) = self.thread.take() {
+            thread.join().expect("Failed to join thread")
+        }
+    }
+}
+
+struct AsyncDbTask<D> {
+    request_queue: stdmpsc::Receiver<DbOp>,
+    db: D,
+}
+
+impl<D: Db> AsyncDbTask<D> {
+    fn run(mut self) {
+        self.db.init().expect("Failed to initialize db");
+
+        for op in self.request_queue {
+            match op {
+                DbOp::GetFile { path, snapshot, cb } => {
+                    cb.send(self.db.file(path.as_path(), snapshot));
+                }
+            }
+        }
     }
 }
