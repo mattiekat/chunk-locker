@@ -1,63 +1,4 @@
 //! Database format:
-//!
-//! # SQL Approach
-//!
-//! ## Archive
-//! Represents backups of a specific machine path.
-//! - machine name
-//! - total archive size
-//! - root directory for backup
-//! - fs type (e.g. ext4, xfs, ntfs, hfs...)
-//! - remote
-//!
-//! ## Snapshot
-//! A single point in time for an archive
-//! - snapshot id
-//! - hashing algorithm used
-//! - encryption algorithm used
-//! - software version used
-//! - time started
-//! - time finished
-//!
-//! ## Directory
-//! Includes files and other directories that are contained in it.
-//! - directory id
-//! - snapshot id
-//! - partial path (just one segment)
-//! - parent directory id
-//! - permissions
-//! - owner
-//! - group
-//! - creation time
-//! - modification time
-//!
-//! ## File
-//! A single file and the chunks that compose it
-//! - file id
-//! - snapshot id
-//! - parent directory id
-//! - filename
-//! - checksum
-//! - permissions
-//! - owner
-//! - group
-//! - creation time
-//! - modification time
-//! - file size
-//! - compression algorithm used (e,g, raw files might not get compressed)
-//!
-//! ## File Relations
-//! - File id
-//! - Chunk id
-//! - Snapshot id
-//! - Ordering
-//!
-//! ## Chunk
-//! - Chunk id
-//! - hash
-//! - (how to find it if not just storing them by hashes in the blobstore)
-//!
-//!
 //! # Event Format
 //! Each entity should be stored as a chain of events, with each snapshot making possible updates to
 //! it.
@@ -125,6 +66,7 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::{Mutex, oneshot};
 
 mod async_db;
+mod sqlite;
 
 #[async_trait]
 trait DbLoader {
