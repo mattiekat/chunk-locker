@@ -64,6 +64,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::{Mutex, oneshot};
+use eyre::Result;
 
 mod async_db;
 mod sqlite;
@@ -72,7 +73,7 @@ mod sqlite;
 trait DbLoader {
     type Output: Db;
 
-    async fn load() -> eyre::Result<Self::Output>;
+    async fn load() -> Result<Self::Output>;
 }
 
 /// ## DB reqs:
@@ -91,17 +92,25 @@ trait DbLoader {
 /// - Pruning will never remove the latest snapshot
 /// - hashes will not collide
 trait Db {
-    fn init(&mut self) -> eyre::Result<()>;
+    type ADB: ArchiveDb;
 
-    fn file(&self, path: &Path, snapshot: Snapshot) -> eyre::Result<Option<FileInfo>>;
+    fn archives(&self) -> Result<Vec<()>>;
+    fn archive(&self, name: &str) -> Result<()>;
 
-    fn record_new_file(&mut self, file: FileInfo) -> eyre::Result<()>;
-    fn record_file_removed(&mut self, file: &Path) -> eyre::Result<()>;
-    fn record_file_modified(&mut self, file: &Path, chunks: Vec<Hash>) -> eyre::Result<()>;
+    fn create_archive(self) -> Result<Self::ADB>;
+    fn open_archive(self) -> Result<Self::ADB>;
+}
 
-    fn prune_snapshot(&mut self, snapshot: Snapshot) -> eyre::Result<()>;
-    fn snapshot(&self, snapshot: Snapshot) -> eyre::Result<SnapshotInfo>;
-    fn snapshots(&self) -> eyre::Result<Vec<SnapshotInfo>>;
+trait ArchiveDb {
+    fn file(&self, path: &Path, snapshot: Snapshot) -> Result<Option<FileInfo>>;
+
+    fn record_new_file(&mut self, file: FileInfo) -> Result<()>;
+    fn record_file_removed(&mut self, file: &Path) -> Result<()>;
+    fn record_file_modified(&mut self, file: &Path, chunks: Vec<Hash>) -> Result<()>;
+
+    fn prune_snapshot(&mut self, snapshot: Snapshot) -> Result<()>;
+    fn snapshot(&self, snapshot: Snapshot) -> Result<SnapshotInfo>;
+    fn snapshots(&self) -> Result<Vec<SnapshotInfo>>;
 }
 
 enum CompressionAlgorithm {}
