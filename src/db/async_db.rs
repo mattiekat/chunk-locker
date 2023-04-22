@@ -4,12 +4,12 @@ use std::sync::mpsc as stdmpsc;
 
 use tokio::sync::oneshot;
 
-use crate::db::{Db, FileInfo, Snapshot};
+use crate::db::{Db, FileInfo, SnapshotId};
 
 enum DbOp {
     GetFile {
         path: PathBuf,
-        snapshot: Snapshot,
+        snapshot: SnapshotId,
         cb: oneshot::Sender<eyre::Result<Option<FileInfo>>>,
     },
 }
@@ -53,7 +53,6 @@ struct AsyncDbTask<D> {
 
 impl<D: Db> AsyncDbTask<D> {
     fn run(mut self) {
-        self.db.init().expect("Failed to initialize db");
 
         for op in self.request_queue {
             match op {

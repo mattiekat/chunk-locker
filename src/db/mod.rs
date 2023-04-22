@@ -57,14 +57,14 @@
 
 #![allow(unused)]
 
-use std::collections::VecDeque;
 use crate::Hash;
 use async_trait::async_trait;
+use eyre::Result;
+use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio::sync::{Mutex, oneshot};
-use eyre::Result;
+use tokio::sync::{oneshot, Mutex};
 
 mod async_db;
 mod sqlite;
@@ -94,33 +94,39 @@ trait DbLoader {
 trait Db {
     type ADB: ArchiveDb;
 
-    fn archives(&self) -> Result<Vec<()>>;
-    fn archive(&self, name: &str) -> Result<()>;
+    fn archives(&self) -> Result<Vec<Archive>>;
+    fn archive(&self, name: &str) -> Result<Archive>;
 
-    fn create_archive(self) -> Result<Self::ADB>;
-    fn open_archive(self) -> Result<Self::ADB>;
+    /// Returns true if it had to use force to lock the archive. Calling this function may cause
+    /// database corruption if the other entity to have locked the database is still running. This
+    /// should be called if the user is able to verify the application that locked the db
+    /// is no longer running.
+    unsafe fn force_claim_archive_lock(&mut self, name: &str) -> Result<bool>;
+
+    fn create_archive(self, name: &str) -> Result<Self::ADB>;
+    fn open_archive(self, name: &str) -> Result<Self::ADB>;
 }
 
 trait ArchiveDb {
-    fn file(&self, path: &Path, snapshot: Snapshot) -> Result<Option<FileInfo>>;
+    fn file(&self, path: &Path, snapshot: SnapshotId) -> Result<Option<FileInfo>>;
 
     fn record_new_file(&mut self, file: FileInfo) -> Result<()>;
     fn record_file_removed(&mut self, file: &Path) -> Result<()>;
     fn record_file_modified(&mut self, file: &Path, chunks: Vec<Hash>) -> Result<()>;
 
-    fn prune_snapshot(&mut self, snapshot: Snapshot) -> Result<()>;
-    fn snapshot(&self, snapshot: Snapshot) -> Result<SnapshotInfo>;
-    fn snapshots(&self) -> Result<Vec<SnapshotInfo>>;
+    fn prune_snapshot(&mut self, snapshot: SnapshotId) -> Result<()>;
+    fn snapshot(&self, snapshot: SnapshotId) -> Result<Snapshot>;
+    fn snapshots(&self) -> Result<Vec<Snapshot>>;
 }
 
 enum CompressionAlgorithm {}
 
-enum Snapshot {
+enum SnapshotId {
     Latest,
     Id(u64),
 }
 
-struct SnapshotInfo {
+struct Snapshot {
     date: SystemTime,
     id: u64,
     completed: bool,
@@ -130,4 +136,10 @@ struct FileInfo {
     hash: Hash,
     chunks: Vec<Hash>,
     compression_algorithm: CompressionAlgorithm,
+}
+
+struct Archive {
+    name: String,
+    machine_name: String,
+    write_lock: Option<i64>,
 }

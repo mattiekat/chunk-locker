@@ -1,7 +1,8 @@
 CREATE TABLE archive
 (
+    id INTEGER PRIMARY KEY,
     -- a uniquely identifying archive name
-    name  TEXT PRIMARY KEY NOT NULL,
+    name  TEXT UNIQUE NOT NULL,
     -- name of the machine which is being backed up
     machine_name  TEXT NOT NULL,
     -- a random integer indicates this archive is locked, null indicates unlocked
