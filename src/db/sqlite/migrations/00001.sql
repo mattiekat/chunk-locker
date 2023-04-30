@@ -1,14 +1,15 @@
 CREATE TABLE archive
 (
-    id INTEGER PRIMARY KEY,
+    id           INTEGER PRIMARY KEY,
     -- a uniquely identifying archive name
-    name  TEXT UNIQUE NOT NULL,
+    name         TEXT UNIQUE NOT NULL,
     -- name of the machine which is being backed up
-    machine_name  TEXT NOT NULL,
+    machine_name TEXT        NOT NULL,
     -- a random integer indicates this archive is locked, null indicates unlocked
-    write_lock    INTEGER
+    write_lock   INTEGER
 ) STRICT;
 
+-- There can be multiple root archive paths for a given archive id.
 CREATE TABLE archive_path
 (
     archive_id INTEGER NOT NULL,
@@ -21,10 +22,15 @@ CREATE TABLE archive_path
         ON DELETE CASCADE
 ) STRICT;
 
+-- A snapshot is a time-locked view on an archive. It should contain all the
+-- information needed to fully reconstruct the filesystem at that point in time
+-- when paired with the chunked data blobs.
 CREATE TABLE snapshot
 (
     id                INTEGER PRIMARY KEY,
     archive_id        INTEGER NOT NULL,
+    -- enumerated value of what type of snapshot this is. i.e. full or incremental.
+    snapshot_type     INTEGER NOT NULL,
     -- the hash algorithm used for this snapshot
     hash_type         TEXT    NOT NULL,
     -- the encryption algorithm used for this snapshot
@@ -57,6 +63,65 @@ CREATE TABLE snapshot
         ON DELETE CASCADE
 ) STRICT;
 
+-- An incremental snapshot is composed of all snapshot updates where
+-- ```
+-- update_snapshot_id > last_full_snapshot_id
+--  && update_snapshot_id <= snapshot_id
+--  && update_archive_id = archive_id
+-- ```
+-- This table is not used for full snapshots.
+--
+-- There are a couple of cases that this catches, for instance:
+-- * A filesystem entry was created in a previous snapshot and then deleted.
+--   this also should include the file id if relevant to make queries easier.
+-- * A file was updated but nothing about the filesystem entry changed.
+--   (e.g. same owner and permissions)
+CREATE TABLE snapshot_update
+(
+    id                       INTEGER PRIMARY KEY,
+    archive_id               INTEGER NOT NULL,
+    snapshot_id              INTEGER NOT NULL,
+
+    filesystem_entry_deleted INTEGER,
+    filesystem_entry_created INTEGER,
+
+    file_deleted             INTEGER,
+    file_created             INTEGER,
+
+    FOREIGN KEY (archive_id)
+        REFERENCES archive (id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (snapshot_id)
+        REFERENCES snapshot (id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (filesystem_entry_deleted)
+        REFERENCES filesystem_entry (id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (filesystem_entry_created)
+        REFERENCES filesystem_entry (id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (file_deleted)
+        REFERENCES "file" (id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (file_created)
+        REFERENCES "file" (id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+) STRICT;
+
+
+-- not all filesystem entries have a file, but all files have a filesystem entry. This could also be
+-- a directory for instance.
 CREATE TABLE filesystem_entry
 (
     id                  INTEGER PRIMARY KEY,
@@ -89,7 +154,7 @@ CREATE TABLE filesystem_entry
         ON DELETE SET NULL
 ) STRICT;
 
-CREATE TABLE file
+CREATE TABLE "file"
 (
     id                  INTEGER PRIMARY KEY,
     filesystem_entry_id INTEGER NOT NULL,
@@ -108,6 +173,8 @@ CREATE TABLE file
         ON DELETE CASCADE
 ) STRICT;
 
+-- Connects chunks to a given file. Needed because there's a many-to-many relation
+-- as chunks will get re-used as part of deduplication.
 CREATE TABLE file_relation
 (
     file_id       INTEGER NOT NULL,
@@ -117,7 +184,7 @@ CREATE TABLE file_relation
     chunk_ordinal INTEGER NOT NULL,
 
     FOREIGN KEY (file_id)
-        REFERENCES file (id)
+        REFERENCES "file" (id)
         ON UPDATE CASCADE
         ON DELETE CASCADE,
 
