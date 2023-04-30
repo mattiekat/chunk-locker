@@ -7,6 +7,7 @@ CREATE TABLE archive
     machine_name TEXT        NOT NULL,
     -- a random integer indicates this archive is locked, null indicates unlocked
     write_lock   INTEGER
+    -- TODO: record information about the remote where the chunks and this db are stored
 ) STRICT;
 
 -- There can be multiple root archive paths for a given archive id.
@@ -29,8 +30,8 @@ CREATE TABLE snapshot
 (
     id                INTEGER PRIMARY KEY,
     archive_id        INTEGER NOT NULL,
-    -- enumerated value of what type of snapshot this is. i.e. full or incremental.
-    snapshot_type     INTEGER NOT NULL,
+    -- true (1) if this snapshot is a full snapshot, false (0) if it is an incremental snapshot.
+    is_full           INTEGER NOT NULL,
     -- the hash algorithm used for this snapshot
     hash_type         TEXT    NOT NULL,
     -- the encryption algorithm used for this snapshot
@@ -166,7 +167,11 @@ CREATE TABLE "file"
     stored_size         INTEGER NOT NULL,
     -- checksum of the entire file, acts as data integrity check to ensure there has
     -- been no corruption once things are put back together on the other end.
-    checksum            BLOB    NOT NULL,
+    -- Should always be included if this is not a symlink.
+    checksum            BLOB,
+    -- path this symlink points to. Null if this is not a symlink.
+    symlink_target      TEXT,
+
     FOREIGN KEY (filesystem_entry_id)
         REFERENCES filesystem_entry (id)
         ON UPDATE CASCADE
@@ -177,6 +182,7 @@ CREATE TABLE "file"
 -- as chunks will get re-used as part of deduplication.
 CREATE TABLE file_relation
 (
+    id            INTEGER PRIMARY KEY,
     file_id       INTEGER NOT NULL,
     chunk_id      INTEGER NOT NULL,
     -- ordering of this chunk in the file, e.g. 4 indicates it is the 5th chunk in the
@@ -193,6 +199,7 @@ CREATE TABLE file_relation
         ON UPDATE CASCADE
         ON DELETE RESTRICT
 ) STRICT;
+
 
 CREATE TABLE chunk
 (
