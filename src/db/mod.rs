@@ -1,79 +1,24 @@
-//! Database format:
-//! # Event Format
-//! Each entity should be stored as a chain of events, with each snapshot making possible updates to
-//! it.
-//!
-//! Main problem with this approach is ensuring there is no corruption on the remote. It would be
-//! really easy for an update to go missing and we just assume it never happened. It also makes it
-//! take a really long time to figure out the details for a specific file since you have to merge
-//! a bunch of events which is bad for a FUSE implementation. It also takes a lot of time to prune
-//! information from.
-//!
-//! ## Archive (`archive`)
-//! ### Create
-//! - root directory to backup
-//! - machine name
-//! - host FS type
-//! - remote
-//! - timestamp
-//! - exclusion patterns
-//! - inclusion patterns
-//!
-//! ## Snapshot (`snapshot-<snapid>`)
-//! ### Snapshot Started
-//! - previous snapshot id
-//! - timestamp
-//! - hashing algorithm used
-//! - encryption algorithm used
-//! - software version used
-//!
-//! ### Snapshot Completed
-//! - timestamp
-//!
-//! ### Add Directory
-//! - parent directory id
-//! - directory id
-//! - partial path (just one segment)
-//!
-//! ## Directory (`directory-<id>/<snapid>`)
-//! ### Add Directory
-//! - parent directory id
-//! - directory id
-//! - partial path (just one segment)
-//! - created time
-//!
-//! ### Update Permissions
-//! - permissions
-//!
-//! # Update Owner
-//! - owner
-//! - group
-//!
-//! # Update Modtime
-//! - timestamp
-//!
-//! ## File (`file-<id>-<snapid>`)
-//!
-
 #![allow(unused)]
 
-use crate::Hash;
-use async_trait::async_trait;
-use eyre::Result;
 use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+
+use async_trait::async_trait;
+use eyre::Result;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{oneshot, Mutex};
+
+use crate::Hash;
 
 mod async_db;
 mod sqlite;
 
-#[async_trait]
 trait DbLoader {
     type Output: Db;
 
-    async fn load() -> Result<Self::Output>;
+    fn load() -> Result<Self::Output>;
 }
 
 /// ## DB reqs:
@@ -103,24 +48,54 @@ trait Db {
     /// is no longer running.
     unsafe fn force_claim_archive_lock(&mut self, name: &str) -> Result<bool>;
 
-    fn create_archive(self, name: &str) -> Result<Self::ADB>;
-    fn open_archive(self, name: &str) -> Result<Self::ADB>;
+    fn create_archive(&self, name: &str) -> Result<Self::ADB>;
+    fn open_archive(&self, name: &str) -> Result<Self::ADB>;
 }
 
 trait ArchiveDb {
-    fn file(&self, path: &Path, snapshot: SnapshotId) -> Result<Option<FileInfo>>;
+    type View: SnapshotView;
+    type IWriter: IncrementalSnapshotWriter;
+    type FWriter: FullSnapshotWriter;
+
+    fn snapshot(&self, snapshot: SnapshotId) -> Result<Self::View>;
+    fn snapshots(&self) -> Result<Vec<Snapshot>>;
+
+    fn create_incremental_snapshot(&self) -> Result<Self::IWriter>;
+    fn create_full_snapshot(&self) -> Result<Self::FWriter>;
+    fn prune_snapshot(&mut self, snapshot: SnapshotId) -> Result<()>;
+}
+
+/// View of directories, files, and symlinks captured by a snapshot. This will compose multiple
+/// snapshots together if the snapshot is incremental.
+trait SnapshotView {
+    // if path is None, it will list the roots
+    fn list_filesystem_entries(&self, path: Option<&Path>) -> Result<Vec<()>>;
+    fn file(&self, path: &Path) -> Result<Option<FileInfo>>;
+}
+
+trait IncrementalSnapshotWriter: SnapshotView {
+    type BaseView: SnapshotView;
+
+    // Access the previous snapshot that this is building on.
+    fn base(&self) -> &Self::BaseView;
+
+    fn record_new_directory(&mut self, path: &Path) -> Result<()>;
+    fn record_directory_removed(&mut self, path: &Path) -> Result<()>;
 
     fn record_new_file(&mut self, file: FileInfo) -> Result<()>;
     fn record_file_removed(&mut self, file: &Path) -> Result<()>;
     fn record_file_modified(&mut self, file: &Path, chunks: Vec<Hash>) -> Result<()>;
+}
 
-    fn prune_snapshot(&mut self, snapshot: SnapshotId) -> Result<()>;
-    fn snapshot(&self, snapshot: SnapshotId) -> Result<Snapshot>;
-    fn snapshots(&self) -> Result<Vec<Snapshot>>;
+trait FullSnapshotWriter: SnapshotView {
+    fn record_directory(&mut self, path: &Path) -> Result<()>;
+    fn record_file(&mut self, file: FileInfo) -> Result<()>;
+    fn record_chunk(&mut self) -> Result<()>;
 }
 
 enum CompressionAlgorithm {}
 
+#[derive(Copy, Clone)]
 enum SnapshotId {
     Latest,
     Id(u64),
@@ -142,4 +117,8 @@ struct Archive {
     name: String,
     machine_name: String,
     write_lock: Option<i64>,
+    remote: Remote,
 }
+
+#[derive(Serialize, Deserialize)]
+enum Remote {}

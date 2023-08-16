@@ -6,8 +6,10 @@ CREATE TABLE archive
     -- name of the machine which is being backed up
     machine_name TEXT        NOT NULL,
     -- a random integer indicates this archive is locked, null indicates unlocked
-    write_lock   INTEGER
-    -- TODO: record information about the remote where the chunks and this db are stored
+    write_lock   INTEGER,
+    -- Serialized configuration describing what remote is used and how to connect to it.
+    -- TODO: can we make this less opaque?
+    remote       BLOB        NOT NULL
 ) STRICT;
 
 -- There can be multiple root archive paths for a given archive id.
